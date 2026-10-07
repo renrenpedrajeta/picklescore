@@ -14,7 +14,11 @@ export function useMatchTimer({
   const [status, setStatus] = useState('idle'); // 'idle' | 'running' | 'paused' | 'expired'
   const [remainingMs, setRemainingMs] = useState(durationMs);
 
+  // Synchronous refs to prevent race conditions & React StrictMode updater double-execution bugs
+  const statusRef = useRef('idle');
+  const remainingMsRef = useRef(durationMs);
   const endsAtRef = useRef(null);
+
   const onExpireRef = useRef(onExpire);
   onExpireRef.current = onExpire;
 
@@ -52,29 +56,39 @@ export function useMatchTimer({
           const now = Date.now();
           const rem = Math.max(0, parsed.endsAt - now);
           if (rem <= 0) {
+            statusRef.current = 'expired';
+            remainingMsRef.current = 0;
+            endsAtRef.current = null;
             setStatus('expired');
             setRemainingMs(0);
-            endsAtRef.current = null;
             persist('expired', 0, null);
             onExpireRef.current?.();
           } else {
+            statusRef.current = 'running';
+            remainingMsRef.current = rem;
+            endsAtRef.current = parsed.endsAt;
             setStatus('running');
             setRemainingMs(rem);
-            endsAtRef.current = parsed.endsAt;
           }
         } else if (parsed.status === 'paused') {
-          setStatus('paused');
           const rem = parsed.remainingMs ?? durationMs;
-          setRemainingMs(rem);
+          statusRef.current = 'paused';
+          remainingMsRef.current = rem;
           endsAtRef.current = null;
+          setStatus('paused');
+          setRemainingMs(rem);
         } else if (parsed.status === 'expired') {
+          statusRef.current = 'expired';
+          remainingMsRef.current = 0;
+          endsAtRef.current = null;
           setStatus('expired');
           setRemainingMs(0);
-          endsAtRef.current = null;
         } else {
+          statusRef.current = 'idle';
+          remainingMsRef.current = durationMs;
+          endsAtRef.current = null;
           setStatus('idle');
           setRemainingMs(durationMs);
-          endsAtRef.current = null;
         }
       }
     } catch {
@@ -84,86 +98,65 @@ export function useMatchTimer({
 
   // Actions
   const start = useCallback(() => {
-    setStatus((prevStatus) => {
-      if (prevStatus === 'running' || prevStatus === 'expired') return prevStatus;
-      setRemainingMs((prevRem) => {
-        const rem = prevRem > 0 ? prevRem : durationMsRef.current;
-        const endsAt = Date.now() + rem;
-        endsAtRef.current = endsAt;
-        persist('running', rem, endsAt);
-        return rem;
-      });
-      return 'running';
-    });
+    if (statusRef.current === 'running' || statusRef.current === 'expired') return;
+    const rem = remainingMsRef.current > 0 ? remainingMsRef.current : durationMsRef.current;
+    const endsAt = Date.now() + rem;
+    endsAtRef.current = endsAt;
+    remainingMsRef.current = rem;
+    statusRef.current = 'running';
+
+    setRemainingMs(rem);
+    setStatus('running');
+    persist('running', rem, endsAt);
   }, [persist]);
 
   const pause = useCallback(() => {
-    setStatus((prevStatus) => {
-      if (prevStatus !== 'running') return prevStatus;
-      let currentRem = 0;
-      if (endsAtRef.current) {
-        currentRem = Math.max(0, endsAtRef.current - Date.now());
-      }
-      endsAtRef.current = null;
-      setRemainingMs(currentRem);
-      persist('paused', currentRem, null);
-      return 'paused';
-    });
+    if (statusRef.current !== 'running') return;
+    const now = Date.now();
+    const currentRem = endsAtRef.current
+      ? Math.max(0, endsAtRef.current - now)
+      : remainingMsRef.current;
+
+    endsAtRef.current = null;
+    remainingMsRef.current = currentRem;
+    statusRef.current = 'paused';
+
+    setRemainingMs(currentRem);
+    setStatus('paused');
+    persist('paused', currentRem, null);
   }, [persist]);
 
   const resume = useCallback(() => {
-    setStatus((prevStatus) => {
-      if (prevStatus !== 'paused') return prevStatus;
-      setRemainingMs((prevRem) => {
-        const endsAt = Date.now() + prevRem;
-        endsAtRef.current = endsAt;
-        persist('running', prevRem, endsAt);
-        return prevRem;
-      });
-      return 'running';
-    });
+    if (statusRef.current !== 'paused') return;
+    const rem = remainingMsRef.current > 0 ? remainingMsRef.current : durationMsRef.current;
+    const endsAt = Date.now() + rem;
+    endsAtRef.current = endsAt;
+    remainingMsRef.current = rem;
+    statusRef.current = 'running';
+
+    setRemainingMs(rem);
+    setStatus('running');
+    persist('running', rem, endsAt);
   }, [persist]);
 
   const toggle = useCallback(() => {
-    setStatus((prevStatus) => {
-      if (prevStatus === 'idle') {
-        setRemainingMs((prevRem) => {
-          const rem = prevRem > 0 ? prevRem : durationMsRef.current;
-          const endsAt = Date.now() + rem;
-          endsAtRef.current = endsAt;
-          persist('running', rem, endsAt);
-          return rem;
-        });
-        return 'running';
-      }
-      if (prevStatus === 'running') {
-        let currentRem = 0;
-        if (endsAtRef.current) {
-          currentRem = Math.max(0, endsAtRef.current - Date.now());
-        }
-        endsAtRef.current = null;
-        setRemainingMs(currentRem);
-        persist('paused', currentRem, null);
-        return 'paused';
-      }
-      if (prevStatus === 'paused') {
-        setRemainingMs((prevRem) => {
-          const endsAt = Date.now() + prevRem;
-          endsAtRef.current = endsAt;
-          persist('running', prevRem, endsAt);
-          return prevRem;
-        });
-        return 'running';
-      }
-      return prevStatus; // expired is no-op
-    });
-  }, [persist]);
+    if (statusRef.current === 'idle') {
+      start();
+    } else if (statusRef.current === 'running') {
+      pause();
+    } else if (statusRef.current === 'paused') {
+      resume();
+    }
+  }, [start, pause, resume]);
 
   const reset = useCallback(() => {
     endsAtRef.current = null;
     lastTickSecRef.current = null;
-    setStatus('idle');
+    remainingMsRef.current = durationMsRef.current;
+    statusRef.current = 'idle';
+
     setRemainingMs(durationMsRef.current);
+    setStatus('idle');
     persist('idle', durationMsRef.current, null);
   }, [persist]);
 
@@ -172,9 +165,11 @@ export function useMatchTimer({
     if (status !== 'running') return;
 
     const checkTime = () => {
-      if (!endsAtRef.current) return;
+      if (!endsAtRef.current || statusRef.current !== 'running') return;
       const now = Date.now();
       const rem = Math.max(0, endsAtRef.current - now);
+
+      remainingMsRef.current = rem;
       setRemainingMs(rem);
 
       // Play soft tick in the final 10 seconds
@@ -188,6 +183,7 @@ export function useMatchTimer({
 
       if (rem === 0) {
         endsAtRef.current = null;
+        statusRef.current = 'expired';
         setStatus('expired');
         persist('expired', 0, null);
         getSynth()?.timeUp();

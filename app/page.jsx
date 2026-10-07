@@ -34,11 +34,15 @@ export default function ScoreboardPage() {
   });
 
   // If the game is won on points while the timer is running, pause the timer at its remaining time
+  const timerPause = timer.pause;
+  const timerStatus = timer.status;
+  const isGameOver = Boolean(state?.gameOver);
+
   useEffect(() => {
-    if (state?.gameOver && timer.status === 'running') {
-      timer.pause();
+    if (isGameOver && timerStatus === 'running') {
+      timerPause();
     }
-  }, [state?.gameOver, timer]);
+  }, [isGameOver, timerStatus, timerPause]);
 
   const handleReset = () => {
     if (typeof window !== 'undefined' && window.confirm(CONTENT.dialogs.resetConfirm)) {
