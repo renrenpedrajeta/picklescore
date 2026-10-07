@@ -1,0 +1,23 @@
+{
+  "name": "pikolscore",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Courtside Precision Pickleball Scoring System in Next.js",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "node test-rules.js"
+  },
+  "dependencies": {
+    "lucide-react": "^1.52.0",
+    "next": "^15.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.6.1",
+    "postcss": "^8.5.29",
+    "tailwindcss": "^3.4.19"
+  }
+}
