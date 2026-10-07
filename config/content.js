@@ -26,10 +26,13 @@ export const CONTENT = {
 
   // Action rally buttons (ActionControls.jsx)
   actions: {
-    undoTitle: 'Undo last rally',
+    undoTitle: 'Undo last rally (Z)',
     undoLabel: 'UNDO',
     pointWonLabel: 'POINT WON',
     faultLabel: 'FAULT',
+    startLabel: 'START',
+    pauseLabel: 'PAUSE',
+    resumeLabel: 'RESUME',
   },
 
   // Game won celebration dialog (GameWonModal.jsx)
