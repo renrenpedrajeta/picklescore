@@ -1,17 +1,7 @@
-import { CONTENT } from '../../config/content';
-
 export function ConsoleFooter({
-  prefix = CONTENT.footer.prefix,
-  credit = CONTENT.footer.credit,
-  meta = CONTENT.footer.meta,
+  text = 'Tap the serving team to score a point. Tap the receiving team to call a fault.',
 }) {
-  return (
-    <footer className="console-footer">
-      <div className="footer-left">{prefix}</div>
-      <div className="footer-center">{credit}</div>
-      <div className="footer-right">{meta}</div>
-    </footer>
-  );
+  return <footer className="ps-footer">{text}</footer>;
 }
 
 export default ConsoleFooter;

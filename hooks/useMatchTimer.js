@@ -6,15 +6,21 @@ import { getSynth } from '../lib/audio';
 export const MATCH_DURATION_MS =
   Number(process.env.NEXT_PUBLIC_MATCH_DURATION_MS) || 30 * 60 * 1000;
 
+export function formatMmSs(totalSeconds) {
+  const sec = Math.max(0, Math.floor(totalSeconds));
+  const m = String(Math.floor(sec / 60)).padStart(2, '0');
+  const s = String(sec % 60).padStart(2, '0');
+  return `${m}:${s}`;
+}
+
 export function useMatchTimer({
   durationMs = MATCH_DURATION_MS,
-  storageKey = 'pikolscore_timer_v1',
+  storageKey = 'pikolscore_timer_v2',
   onExpire,
 } = {}) {
   const [status, setStatus] = useState('idle'); // 'idle' | 'running' | 'paused' | 'expired'
   const [remainingMs, setRemainingMs] = useState(durationMs);
 
-  // Synchronous refs to prevent race conditions & React StrictMode updater double-execution bugs
   const statusRef = useRef('idle');
   const remainingMsRef = useRef(durationMs);
   const endsAtRef = useRef(null);
@@ -27,7 +33,6 @@ export function useMatchTimer({
 
   const lastTickSecRef = useRef(null);
 
-  // Helper to persist snapshot
   const persist = useCallback(
     (currentStatus, currentRemaining, currentEndsAt) => {
       try {
@@ -46,7 +51,6 @@ export function useMatchTimer({
     [storageKey]
   );
 
-  // Hydrate from localStorage inside useEffect to prevent SSR hydration mismatch
   useEffect(() => {
     try {
       const saved = localStorage.getItem(storageKey);
@@ -96,10 +100,10 @@ export function useMatchTimer({
     }
   }, [storageKey, durationMs, persist]);
 
-  // Actions
   const start = useCallback(() => {
-    if (statusRef.current === 'running' || statusRef.current === 'expired') return;
-    const rem = remainingMsRef.current > 0 ? remainingMsRef.current : durationMsRef.current;
+    if (statusRef.current === 'running') return;
+    const rem =
+      remainingMsRef.current > 0 ? remainingMsRef.current : durationMsRef.current;
     const endsAt = Date.now() + rem;
     endsAtRef.current = endsAt;
     remainingMsRef.current = rem;
@@ -128,7 +132,8 @@ export function useMatchTimer({
 
   const resume = useCallback(() => {
     if (statusRef.current !== 'paused') return;
-    const rem = remainingMsRef.current > 0 ? remainingMsRef.current : durationMsRef.current;
+    const rem =
+      remainingMsRef.current > 0 ? remainingMsRef.current : durationMsRef.current;
     const endsAt = Date.now() + rem;
     endsAtRef.current = endsAt;
     remainingMsRef.current = rem;
@@ -138,16 +143,6 @@ export function useMatchTimer({
     setStatus('running');
     persist('running', rem, endsAt);
   }, [persist]);
-
-  const toggle = useCallback(() => {
-    if (statusRef.current === 'idle') {
-      start();
-    } else if (statusRef.current === 'running') {
-      pause();
-    } else if (statusRef.current === 'paused') {
-      resume();
-    }
-  }, [start, pause, resume]);
 
   const reset = useCallback(() => {
     endsAtRef.current = null;
@@ -160,7 +155,17 @@ export function useMatchTimer({
     persist('idle', durationMsRef.current, null);
   }, [persist]);
 
-  // Wall-clock ticker while running
+  const toggle = useCallback(() => {
+    if (statusRef.current === 'running') {
+      pause();
+    } else if (statusRef.current === 'paused') {
+      resume();
+    } else {
+      // 'idle' or 'expired': start (resetting to 30:00 if expired)
+      start();
+    }
+  }, [start, pause, resume]);
+
   useEffect(() => {
     if (status !== 'running') return;
 
@@ -172,7 +177,6 @@ export function useMatchTimer({
       remainingMsRef.current = rem;
       setRemainingMs(rem);
 
-      // Play soft tick in the final 10 seconds
       if (rem > 0 && rem <= 10000) {
         const sec = Math.ceil(rem / 1000);
         if (sec !== lastTickSecRef.current) {
@@ -206,12 +210,15 @@ export function useMatchTimer({
     };
   }, [status, persist]);
 
-  // Screen Wake Lock API handling
   useEffect(() => {
     let wakeLock = null;
 
     async function requestWakeLock() {
-      if (typeof navigator !== 'undefined' && 'wakeLock' in navigator && status === 'running') {
+      if (
+        typeof navigator !== 'undefined' &&
+        'wakeLock' in navigator &&
+        status === 'running'
+      ) {
         try {
           wakeLock = await navigator.wakeLock.request('screen');
         } catch {
@@ -240,8 +247,22 @@ export function useMatchTimer({
     };
   }, [status]);
 
+  const totalSeconds = Math.round(durationMs / 1000);
+  const remainingSeconds = Math.ceil(remainingMs / 1000);
+  const elapsedSeconds = Math.max(0, totalSeconds - remainingSeconds);
+  const formattedTime = formatMmSs(remainingSeconds);
+
+  const label =
+    remainingSeconds === 0 && status !== 'running'
+      ? "time's up, tap to reset"
+      : status === 'running'
+      ? 'tap here to stop'
+      : 'tap here to start';
+
   const progress =
-    durationMs > 0 ? Math.min(1, Math.max(0, (durationMs - remainingMs) / durationMs)) : 0;
+    durationMs > 0
+      ? Math.min(1, Math.max(0, (durationMs - remainingMs) / durationMs))
+      : 0;
 
   const isWarning =
     (status === 'running' || status === 'paused') &&
@@ -251,6 +272,10 @@ export function useMatchTimer({
   return {
     status,
     remainingMs,
+    remainingSeconds,
+    elapsedSeconds,
+    formattedTime,
+    label,
     progress,
     isWarning,
     start,

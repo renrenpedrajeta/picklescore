@@ -1,3 +1,6 @@
+'use client';
+
+import { useState, useEffect } from 'react';
 import { CONTENT } from '../../config/content';
 
 export function FlapDisplay({
@@ -6,17 +9,26 @@ export function FlapDisplay({
   label = CONTENT.flapDisplay.label,
   symbol = CONTENT.flapDisplay.symbol,
 }) {
+  const [isFlipping, setIsFlipping] = useState(false);
+
+  useEffect(() => {
+    setIsFlipping(true);
+    const timer = setTimeout(() => setIsFlipping(false), 450);
+    return () => clearTimeout(timer);
+  }, [teamName]);
+
   return (
     <div
       className="flap-display-wrapper"
       onClick={onEdit}
       style={onEdit ? { cursor: 'pointer' } : undefined}
+      title={onEdit ? 'Edit team details' : undefined}
     >
       <div className="flap-label">
         <span>{symbol}</span>
         <span>{label}</span>
       </div>
-      <div className="flap-unit">
+      <div className={`flap-unit ${isFlipping ? 'is-flipping' : ''}`}>
         <div className="flap-hinge-left" />
         <div className="flap-seam" />
         <span className="flap-text">{teamName}</span>

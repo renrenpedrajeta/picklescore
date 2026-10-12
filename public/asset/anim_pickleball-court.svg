@@ -3,7 +3,7 @@
         /* Base Animation Classes (fallback for reduced motion is static) */
         .dust {
             fill: none;
-            stroke: #f1e8cf;
+            stroke: #FEECD6;
             stroke-width: 2.5;
             opacity: 0;
         }
@@ -139,19 +139,19 @@
 <!-- Static Court Structure -->
     <g id="court">
         <!-- Apron Shadow -->
-        <polygon points="15,238 262,58 540,203 290,383" fill="#c3d0c6" transform="translate(0, 15)" />
+        <polygon points="15,238 262,58 540,203 290,383" fill="#E2E5DC" transform="translate(0, 15)" />
         
         <!-- Apron Base -->
-        <polygon points="15,238 262,58 540,203 290,383" fill="#a3b19e" />
+        <polygon points="15,238 262,58 540,203 290,383" fill="#8A9B82" />
         
         <!-- Playing Surface -->
-        <polygon points="55,232 265,80 500,203 290,357" fill="#26705f" />
+        <polygon points="55,232 265,80 500,203 290,357" fill="#0F5C62" />
 
         <!-- Lighter Teal Net Strip -->
-        <polygon points="155,160 395,280 385,285 145,165" fill="#5a9985" />
+        <polygon points="155,160 395,280 385,285 145,165" fill="#8A9B82" />
 
         <!-- Court Lines -->
-        <g stroke="#f1e8cf" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <g stroke="#FEECD6" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <!-- Outer Boundary -->
             <polygon points="55,232 265,80 500,203 290,357" fill="none" />
             <!-- Far Kitchen Line -->
@@ -181,24 +181,24 @@
     <!-- Net Structure (Animated Wobble) -->
     <g id="net" class="anim-net">
         <!-- Mesh Background -->
-        <polygon points="152,120 422,265 422,300 152,155" fill="#14403a" opacity="0.6"/>
+        <polygon points="152,120 422,265 422,300 152,155" fill="#084B46" opacity="0.6"/>
         
         <!-- Top Tape -->
-        <line x1="152" y1="120" x2="422" y2="265" stroke="#f1e8cf" stroke-width="3" stroke-linecap="round"/>
+        <line x1="152" y1="120" x2="422" y2="265" stroke="#FEECD6" stroke-width="3" stroke-linecap="round"/>
         
         <!-- Subtle Mesh Weave Simulation -->
-        <path d="M 179,134 L 179,169 M 206,149 L 206,184 M 233,163 L 233,198 M 260,178 L 260,213 M 287,192 L 287,227 M 314,207 L 314,242 M 341,221 L 341,256 M 368,236 L 368,271 M 395,250 L 395,285" stroke="#a3b19e" stroke-width="0.75" opacity="0.5"/>
+        <path d="M 179,134 L 179,169 M 206,149 L 206,184 M 233,163 L 233,198 M 260,178 L 260,213 M 287,192 L 287,227 M 314,207 L 314,242 M 341,221 L 341,256 M 368,236 L 368,271 M 395,250 L 395,285" stroke="#8A9B82" stroke-width="0.75" opacity="0.5"/>
         
         <!-- Posts -->
-        <line x1="152" y1="110" x2="152" y2="168" stroke="#0c2622" stroke-width="5" stroke-linecap="round"/>
-        <line x1="422" y1="255" x2="422" y2="313" stroke="#0c2622" stroke-width="5" stroke-linecap="round"/>
+        <line x1="152" y1="110" x2="152" y2="168" stroke="#203F39" stroke-width="5" stroke-linecap="round"/>
+        <line x1="422" y1="255" x2="422" y2="313" stroke="#203F39" stroke-width="5" stroke-linecap="round"/>
     </g>
 
     <!-- Animated Ball & Shadow -->
     <g class="anim-ground" transform="translate(285, 290)">
         
         <!-- Ground Shadow -->
-        <ellipse cx="0" cy="0" rx="10" ry="5" fill="#0c2622" class="anim-shadow" style="transform-origin: 0px 0px;" />
+        <ellipse cx="0" cy="0" rx="10" ry="5" fill="#203F39" class="anim-shadow" style="transform-origin: 0px 0px;" />
 
         <!-- Vertical Height Group -->
         <g class="anim-height">
@@ -210,12 +210,12 @@
                 <g class="anim-spin" style="transform-origin: 0px 0px;">
                     
                     <!-- Ball Base -->
-                    <circle cx="0" cy="0" r="10" fill="#e5e88a" />
+                    <circle cx="0" cy="0" r="10" fill="#FEECD6" />
                     
                     <!-- Pickleball Holes -->
-                    <circle cx="-3" cy="-3" r="1.5" fill="#a0a843" />
-                    <circle cx="4" cy="-1" r="1.5" fill="#a0a843" />
-                    <circle cx="0" cy="4" r="1.5" fill="#a0a843" />
+                    <circle cx="-3" cy="-3" r="1.5" fill="#748079" />
+                    <circle cx="4" cy="-1" r="1.5" fill="#748079" />
+                    <circle cx="0" cy="4" r="1.5" fill="#748079" />
                 </g>
             </g>
         </g>

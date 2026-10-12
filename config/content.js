@@ -41,6 +41,8 @@ export const CONTENT = {
     finalScoreLabel: (scores) =>
       `Final Score: ${scores?.[0]} - ${scores?.[1]} (Official 11-point win by 2)`,
     newMatchButton: 'Start New Match',
+    undoButton: 'Undo Winning Point',
+    reviewButton: 'Review Scoreboard',
   },
 
   // Interactive prompts & confirms (app/page.jsx)
@@ -56,4 +58,5 @@ export const CONTENT = {
   },
 };
 
+export { AUTH_CONTENT } from './content/auth';
 export default CONTENT;
