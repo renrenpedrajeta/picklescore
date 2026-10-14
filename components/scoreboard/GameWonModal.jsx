@@ -13,6 +13,8 @@ export function GameWonModal({
   onUndo,
   onClose,
   canUndo = true,
+  isDraw = false,
+  isTimeExpired = false,
   title,
   detail,
   inert: inertProp,
@@ -97,8 +99,19 @@ export function GameWonModal({
   if (!open) return null;
 
   const resolvedWinner = winnerName || teamNames[0] || 'Team';
-  const displayTitle = title ?? CONTENT.gameWonModal.title(resolvedWinner);
-  const displayDetail = detail ?? CONTENT.gameWonModal.finalScoreLabel(scores);
+  const displayTitle =
+    title ??
+    (isDraw
+      ? `MATCH TIED: ${scores[0]} – ${scores[1]}`
+      : CONTENT.gameWonModal.title(resolvedWinner));
+
+  const displayDetail =
+    detail ??
+    (isDraw
+      ? 'Time expired · Match concluded in a draw'
+      : isTimeExpired
+      ? `Final Score: ${scores[0]} – ${scores[1]} (Time Expired)`
+      : CONTENT.gameWonModal.finalScoreLabel(scores));
 
   return (
     <div
@@ -148,7 +161,7 @@ export function GameWonModal({
 
         <p className="ps-victory-detail">{displayDetail}</p>
 
-        {/* Action buttons: Only "New Match" and "Undo" */}
+        {/* Action buttons: "New Match" and "Undo" or "Review Scoreboard" */}
         <div className="ps-victory-actions">
           <button
             ref={primaryBtnRef}
@@ -160,7 +173,7 @@ export function GameWonModal({
             <span>{CONTENT.gameWonModal.newMatchButton}</span>
           </button>
 
-          {canUndo && onUndo && (
+          {canUndo && onUndo ? (
             <button
               type="button"
               className="ps-victory-btn-secondary"
@@ -169,7 +182,15 @@ export function GameWonModal({
               <Undo2 size={16} aria-hidden="true" />
               <span>{CONTENT.gameWonModal.undoButton}</span>
             </button>
-          )}
+          ) : onClose ? (
+            <button
+              type="button"
+              className="ps-victory-btn-secondary"
+              onClick={onClose}
+            >
+              <span>{CONTENT.gameWonModal.reviewButton || 'Review Scoreboard'}</span>
+            </button>
+          ) : null}
         </div>
       </div>
     </div>

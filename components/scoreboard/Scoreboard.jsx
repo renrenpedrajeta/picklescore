@@ -15,6 +15,7 @@ import MatchLog from './MatchLog';
 import GameWonModal from './GameWonModal';
 import { supabase } from '@/config/supabase';
 import { PickleballEngine } from '@/lib/engine';
+import { getSynth } from '@/lib/audio';
 
 export function Scoreboard() {
   const router = useRouter();
@@ -22,6 +23,7 @@ export function Scoreboard() {
   const [userEmail, setUserEmail] = useState(null);
   const [logOpen, setLogOpen] = useState(false);
   const [gameWonModalOpen, setGameWonModalOpen] = useState(false);
+  const [isTimeExpired, setIsTimeExpired] = useState(false);
 
   // 1. Detect Guest State (isGuest)
   const [isGuest, setIsGuest] = useState(() => {
@@ -78,7 +80,10 @@ export function Scoreboard() {
     checkAuthAndProfile();
   }, [router]);
 
+  const handleTimerExpireRef = useRef(null);
+
   const timer = useMatchTimer({
+    onExpire: () => handleTimerExpireRef.current?.(),
     sync,
   });
 
@@ -105,11 +110,13 @@ export function Scoreboard() {
     log,
     gameOver,
     winnerName,
+    isDraw,
     point,
     fault,
     undo,
     redo,
     reset,
+    timeExpired,
   } = useScoreboard({
     elapsedSeconds: timer.elapsedSeconds,
     onEscape: handleEscape,
@@ -117,6 +124,21 @@ export function Scoreboard() {
     sync,
     engineRef,
   });
+
+  // Handler for when match countdown timer reaches 00:00
+  handleTimerExpireRef.current = () => {
+    if (state?.gameOver) return;
+    setIsTimeExpired(true);
+    const res = timeExpired?.();
+    if (res?.isDraw) {
+      // Time-up buzzer already played by useMatchTimer
+    } else {
+      setTimeout(() => {
+        getSynth()?.gameWon();
+      }, 500);
+    }
+    setGameWonModalOpen(true);
+  };
 
   // Automatically pause timer and trigger GameWonModal when a team wins
   useEffect(() => {
@@ -138,7 +160,8 @@ export function Scoreboard() {
       !isGuest &&
       profile
     ) {
-      sync.createSession(engineRef.current, timer.durationMs);
+      timer.start();
+      sync.createSession(engineRef.current, timer.durationMs, true);
     }
   }, [sync?.isEnabled, sync?.isLoadingSession, sync?.sessionId, isGuest, profile, timer.durationMs]);
 
@@ -146,18 +169,21 @@ export function Scoreboard() {
   const handleNewMatch = useCallback(async () => {
     if (isGuest) return;
 
+    setIsTimeExpired(false);
     if (sync?.isEnabled && sync.sessionId) {
       const isCompleted = state?.gameOver;
       await sync.closeSession(isCompleted ? 'completed' : 'abandoned');
       reset();
       timer.reset();
+      timer.start();
       setGameWonModalOpen(false);
       if (engineRef.current) {
-        await sync.createSession(engineRef.current, timer.durationMs);
+        await sync.createSession(engineRef.current, timer.durationMs, true);
       }
     } else {
       reset();
       timer.reset();
+      timer.start();
       setGameWonModalOpen(false);
     }
   }, [isGuest, reset, timer, sync, state?.gameOver]);
@@ -327,7 +353,9 @@ export function Scoreboard() {
           winnerName={state?.winnerName}
           scores={scores}
           teamNames={teamNames}
-          canUndo={canUndo}
+          canUndo={canUndo && !isTimeExpired}
+          isDraw={Boolean(state?.isDraw)}
+          isTimeExpired={isTimeExpired}
           onNewMatch={handleNewMatch}
           onUndo={handleUndoWinningPoint}
           onClose={handleCloseGameWon}

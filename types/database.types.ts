@@ -201,6 +201,7 @@ export type Database = {
           p_initial_state: Json;
           p_timer_duration_ms?: number;
           p_legacy_log?: Json | null;
+          p_auto_start_timer?: boolean;
         };
         Returns: Database['public']['Tables']['match_sessions']['Row'];
       };

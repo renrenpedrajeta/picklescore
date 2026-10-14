@@ -234,6 +234,7 @@ export function useMatchSync({ engineRef, timerRef, isGuest = false }) {
           p_initial_state: initialState,
           p_timer_duration_ms: parsedTimer?.remainingMs || 1800000,
           p_legacy_log: legacyLogData,
+          p_auto_start_timer: false,
         });
 
         if (sessErr) {
@@ -423,7 +424,7 @@ export function useMatchSync({ engineRef, timerRef, isGuest = false }) {
 
   // Create a brand new session in Supabase
   const createSession = useCallback(
-    async (engine, timerDurationMs = 1800000) => {
+    async (engine, timerDurationMs = 1800000, autoStartTimer = true) => {
       if (!isEnabled || !engine || isGuest) return null;
 
       const newId =
@@ -453,6 +454,7 @@ export function useMatchSync({ engineRef, timerRef, isGuest = false }) {
           p_initial_state: initialState,
           p_timer_duration_ms: timerDurationMs,
           p_legacy_log: null,
+          p_auto_start_timer: autoStartTimer,
         });
 
         if (error) {

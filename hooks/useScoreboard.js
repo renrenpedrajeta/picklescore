@@ -220,6 +220,29 @@ export function useScoreboard({
     [isGuest, syncState, sync, engineRef]
   );
 
+  const timeExpired = useCallback(() => {
+    const engine = engineRef.current;
+    if (!engine) return null;
+    const res = engine.timeExpired(elapsedSecondsRef.current);
+    syncState();
+
+    if (sync?.isEnabled && res?.logEntry) {
+      sync.recordRally({
+        eventId:
+          typeof crypto !== 'undefined' && crypto.randomUUID
+            ? crypto.randomUUID()
+            : null,
+        eventType: 'gameWon',
+        elapsedSeconds: elapsedSecondsRef.current,
+        stateAfter: engineToRallyState(engine),
+        callString: res.logEntry.call,
+        message: res.logEntry.message,
+      });
+    }
+
+    return res;
+  }, [engineRef, syncState, sync]);
+
   useEffect(() => {
     if (!keyboardShortcuts || isGuest) return;
 
@@ -266,11 +289,13 @@ export function useScoreboard({
     gameOver: Boolean(state?.gameOver),
     winner: state?.winner ?? null,
     winnerName: state?.winnerName ?? null,
+    isDraw: Boolean(state?.isDraw),
     point,
     fault,
     undo,
     redo,
     reset,
+    timeExpired,
     setTeamName,
     setTeamPalette,
   };
