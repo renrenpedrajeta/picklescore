@@ -2,7 +2,7 @@
 
 import { formatMmSs } from '../../hooks/useMatchTimer';
 
-export function MatchLog({ open, entries = [], onClose }) {
+export function MatchLog({ open, entries = [], onClose, ...rest }) {
   if (!open) return null;
 
   const reversed = [...entries].reverse();
@@ -10,7 +10,7 @@ export function MatchLog({ open, entries = [], onClose }) {
   return (
     <>
       <div className="ps-scrim" onClick={onClose} aria-hidden="true" />
-      <aside className="ps-log-aside" aria-label="Match log">
+      <aside className="ps-log-aside" aria-label="Match log" {...rest}>
         <div className="ps-log-header">
           <span>Match log</span>
           <button type="button" className="ps-pill" onClick={onClose}>

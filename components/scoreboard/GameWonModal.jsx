@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
 import { Trophy, RotateCcw, Undo2, X } from 'lucide-react';
 import { CONTENT } from '../../config/content';
 
@@ -14,7 +15,85 @@ export function GameWonModal({
   canUndo = true,
   title,
   detail,
+  inert: inertProp,
 }) {
+  const overlayRef = useRef(null);
+  const primaryBtnRef = useRef(null);
+
+  // Apply HTML inert to background / sibling elements while modal is open
+  useEffect(() => {
+    if (!open) return;
+
+    const overlay = overlayRef.current;
+    if (!overlay) return;
+
+    const previouslyFocused = document.activeElement;
+    const modifiedElements = [];
+
+    // Find all sibling elements at each ancestor level outside this modal overlay
+    let current = overlay;
+    while (
+      current &&
+      current.parentElement &&
+      current.parentElement !== document.documentElement
+    ) {
+      const parent = current.parentElement;
+      for (const child of parent.children) {
+        if (child !== current && !child.contains(overlay)) {
+          if (!child.hasAttribute('inert')) {
+            child.setAttribute('inert', '');
+            try {
+              child.inert = true;
+            } catch {
+              // Ignore if not supported directly on property
+            }
+            modifiedElements.push(child);
+          }
+        }
+      }
+      current = parent;
+    }
+
+    // Auto-focus primary action inside the modal
+    const focusTimer = setTimeout(() => {
+      if (primaryBtnRef.current) {
+        primaryBtnRef.current.focus();
+      }
+    }, 40);
+
+    // Trap Escape key to exit modal
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose?.();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      clearTimeout(focusTimer);
+      window.removeEventListener('keydown', handleKeyDown);
+
+      // Restore inert state on background elements
+      modifiedElements.forEach((el) => {
+        el.removeAttribute('inert');
+        try {
+          el.inert = false;
+        } catch {
+          // Ignore
+        }
+      });
+
+      if (previouslyFocused && typeof previouslyFocused.focus === 'function') {
+        try {
+          previouslyFocused.focus();
+        } catch {
+          // Ignore
+        }
+      }
+    };
+  }, [open, onClose]);
+
   if (!open) return null;
 
   const resolvedWinner = winnerName || teamNames[0] || 'Team';
@@ -22,14 +101,20 @@ export function GameWonModal({
   const displayDetail = detail ?? CONTENT.gameWonModal.finalScoreLabel(scores);
 
   return (
-    <div className="ps-modal-overlay" role="presentation">
-      <div className="ps-scrim" onClick={onClose} aria-hidden="true" />
+    <div
+      ref={overlayRef}
+      className="ps-modal-overlay"
+      role="presentation"
+      inert={Boolean(inertProp)}
+    >
+      <div className="ps-scrim" inert aria-hidden="true" />
       <div
         className="ps-victory-card"
         role="dialog"
         aria-modal="true"
         aria-labelledby="victory-modal-title"
       >
+        {/* "X" button for exiting out of the modal */}
         <button
           type="button"
           className="ps-modal-close-btn"
@@ -63,8 +148,10 @@ export function GameWonModal({
 
         <p className="ps-victory-detail">{displayDetail}</p>
 
+        {/* Action buttons: Only "New Match" and "Undo" */}
         <div className="ps-victory-actions">
           <button
+            ref={primaryBtnRef}
             type="button"
             className="ps-victory-btn-primary"
             onClick={onNewMatch}
@@ -83,14 +170,6 @@ export function GameWonModal({
               <span>{CONTENT.gameWonModal.undoButton}</span>
             </button>
           )}
-
-          <button
-            type="button"
-            className="ps-victory-btn-tertiary"
-            onClick={onClose}
-          >
-            {CONTENT.gameWonModal.reviewButton}
-          </button>
         </div>
       </div>
     </div>

@@ -1,12 +1,27 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { Eye, X } from 'lucide-react';
 import { supabase } from '@/config/supabase';
 import { AUTH_CONTENT } from '@/config/content/auth';
+import {
+  getValidSavedAccounts,
+  removeSavedAccount,
+  SEVEN_DAYS_MS,
+} from '@/lib/auth-session';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function getInitials(name, email) {
+  const source = (name || email || 'U').trim();
+  const parts = source.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  }
+  return source.slice(0, 2).toUpperCase();
+}
 
 function formatAuthError(error, fallbackAction = 'Check your details and try again.') {
   const msg = (error?.message || '').toLowerCase();
@@ -38,6 +53,12 @@ export function LoginForm({ initialMode = 'signin' }) {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
+  // Soft logout & quick switch state
+  const [savedAccounts, setSavedAccounts] = useState([]);
+  const [isSwitching, setIsSwitching] = useState(false);
+  const [switchingUserId, setSwitchingUserId] = useState(null);
+  const passwordInputRef = useRef(null);
+
   const [nameError, setNameError] = useState('');
   const [emailError, setEmailError] = useState('');
   const [passwordError, setPasswordError] = useState('');
@@ -47,6 +68,10 @@ export function LoginForm({ initialMode = 'signin' }) {
   const isSignUp = mode === 'signup';
   const copy = isSignUp ? AUTH_CONTENT.signUp : AUTH_CONTENT.signIn;
   const { fields } = AUTH_CONTENT;
+
+  useEffect(() => {
+    setSavedAccounts(getValidSavedAccounts());
+  }, []);
 
   const clearFeedback = () => {
     setNameError('');
@@ -60,30 +85,94 @@ export function LoginForm({ initialMode = 'signin' }) {
     if (nextMode === mode) return;
     clearFeedback();
     setMode(nextMode);
+    if (nextMode === 'signin') {
+      setSavedAccounts(getValidSavedAccounts());
+    }
   };
 
-  const handleOAuth = async (provider) => {
+  // Quick Login Handler with Double-Tap Mutex & Server-Side Expiry Check
+  const handleQuickLogin = async (account) => {
+    if (isSwitching) return; // Mutex prevents double-tap token revocation
+    setIsSwitching(true);
+    setSwitchingUserId(account.userId);
     clearFeedback();
-    setIsLoading(true);
+
+    const handleExpiredFallback = (acc) => {
+      const updated = removeSavedAccount(acc.userId);
+      setSavedAccounts(updated);
+      setEmail(acc.email);
+      setIsSwitching(false);
+      setSwitchingUserId(null);
+      setPasswordError(
+        'Session expired after 7 days. Please enter your password to continue.'
+      );
+      setTimeout(() => passwordInputRef.current?.focus(), 50);
+    };
 
     try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider,
-        options: {
-          redirectTo: `${window.location.origin}/pikolscore`,
-        },
+      const { data, error } = await supabase.auth.refreshSession({
+        refresh_token: account.refreshToken,
       });
-      if (error) {
-        setPasswordError(
-          formatAuthError(error, 'Try another sign-in method or use your email and password.')
-        );
-        setIsLoading(false);
+
+      if (error || !data?.session?.user) {
+        handleExpiredFallback(account);
+        return;
       }
+
+      const userId = data.session.user.id;
+
+      // Verify 7-day server-side activity boundary on public.profiles
+      const { data: profile, error: profileErr } = await supabase
+        .from('profiles')
+        .select('last_active_at')
+        .eq('id', userId)
+        .single();
+
+      const isServerExpired =
+        profileErr ||
+        !profile?.last_active_at ||
+        Date.now() - new Date(profile.last_active_at).getTime() > SEVEN_DAYS_MS;
+
+      if (isServerExpired) {
+        // Officially terminate the stale session via Supabase Auth API
+        await supabase.auth.signOut();
+        handleExpiredFallback(account);
+        return;
+      }
+
+      // Valid session: stamp fresh activity and remove from saved_accounts while active
+      await supabase
+        .from('profiles')
+        .update({ last_active_at: new Date().toISOString() })
+        .eq('id', userId);
+
+      removeSavedAccount(account.userId);
+      router.replace('/pikolscore');
     } catch (err) {
-      setPasswordError(
-        formatAuthError(err, 'Check your internet connection and try again.')
-      );
-      setIsLoading(false);
+      console.error('Quick login failed:', err);
+      handleExpiredFallback(account);
+    }
+  };
+
+  // Manual Account Removal ("x" Hard Logout)
+  const handleRemoveSavedAccount = async (e, account) => {
+    e.stopPropagation();
+    if (isSwitching) return;
+
+    // Optimistic removal from UI and localStorage
+    const updated = removeSavedAccount(account.userId);
+    setSavedAccounts(updated);
+
+    if (account.sessionId) {
+      try {
+        await fetch('/api/auth/revoke-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: account.sessionId }),
+        });
+      } catch (err) {
+        console.error('Failed to revoke session on server:', err);
+      }
     }
   };
 
@@ -189,6 +278,17 @@ export function LoginForm({ initialMode = 'signin' }) {
         }
 
         if (data?.session) {
+          if (data.session.user) {
+            try {
+              await supabase
+                .from('profiles')
+                .update({ last_active_at: new Date().toISOString() })
+                .eq('id', data.session.user.id);
+            } catch (stampErr) {
+              console.warn('Failed to stamp last_active_at on signup:', stampErr);
+            }
+            removeSavedAccount(data.session.user.id);
+          }
           router.push('/pikolscore');
           return;
         }
@@ -201,7 +301,7 @@ export function LoginForm({ initialMode = 'signin' }) {
         return;
       }
 
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email: trimmedEmail,
         password,
       });
@@ -210,6 +310,18 @@ export function LoginForm({ initialMode = 'signin' }) {
         setPasswordError(formatAuthError(error));
         setIsLoading(false);
         return;
+      }
+
+      if (data?.session?.user) {
+        try {
+          await supabase
+            .from('profiles')
+            .update({ last_active_at: new Date().toISOString() })
+            .eq('id', data.session.user.id);
+        } catch (stampErr) {
+          console.warn('Failed to stamp last_active_at on login:', stampErr);
+        }
+        removeSavedAccount(data.session.user.id);
       }
 
       router.push('/pikolscore');
@@ -254,7 +366,7 @@ export function LoginForm({ initialMode = 'signin' }) {
             role="tab"
             aria-selected={!isSignUp}
             onClick={() => switchMode('signin')}
-            disabled={isLoading}
+            disabled={isLoading || isSwitching}
             className={`flex items-center justify-center rounded-full border-0 text-[15px] font-semibold transition-colors cursor-pointer disabled:cursor-default focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-dark-teal ${
               !isSignUp ? 'bg-teal text-off-white' : 'bg-transparent text-deep-green hover:bg-pale-sage'
             }`}
@@ -266,7 +378,7 @@ export function LoginForm({ initialMode = 'signin' }) {
             role="tab"
             aria-selected={isSignUp}
             onClick={() => switchMode('signup')}
-            disabled={isLoading}
+            disabled={isLoading || isSwitching}
             className={`flex items-center justify-center rounded-full border-0 text-[15px] font-semibold transition-colors cursor-pointer disabled:cursor-default focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-dark-teal ${
               isSignUp ? 'bg-teal text-off-white' : 'bg-transparent text-deep-green hover:bg-pale-sage'
             }`}
@@ -406,6 +518,7 @@ export function LoginForm({ initialMode = 'signin' }) {
                 <path d="M8 11V8a4 4 0 0 1 8 0v3" />
               </svg>
               <input
+                ref={passwordInputRef}
                 id="password"
                 name="password"
                 type={showPassword ? 'text' : 'password'}
@@ -509,58 +622,98 @@ export function LoginForm({ initialMode = 'signin' }) {
 
         <button
           type="submit"
-          disabled={isLoading}
+          disabled={isLoading || isSwitching}
           className="mt-6 flex h-[56px] items-center justify-center gap-3 rounded-full border-0 bg-teal text-[17px] font-semibold text-cream shadow-[0_10px_24px_-10px_rgba(15,92,98,0.5)] transition-colors hover:bg-forest-teal active:translate-y-[2px] cursor-pointer disabled:cursor-default focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal"
         >
           {isLoading ? copy.submitting : copy.submit}
         </button>
 
-        <div className="my-5 flex items-center gap-4 text-xs font-semibold tracking-wider text-muted">
-          <span className="h-px flex-1 bg-line" />
-          {AUTH_CONTENT.divider}
-          <span className="h-px flex-1 bg-line" />
-        </div>
+        {/* Lower Panel: Account Chooser + Guest Action (Sign In mode) */}
+        {!isSignUp && (
+          <div className="mt-8 flex flex-col gap-4">
+            {savedAccounts.length > 0 && (
+              <>
+                <div className="relative flex items-center justify-center">
+                  <div className="absolute inset-0 flex items-center" aria-hidden="true">
+                    <div className="w-full border-t border-line" />
+                  </div>
+                  <span className="relative bg-pale-sage px-3 text-[12px] font-semibold uppercase tracking-[0.06em] text-muted">
+                    Or Quick Switch
+                  </span>
+                </div>
 
-        <div className="flex flex-col gap-3">
-          <button
-            type="button"
-            onClick={() => handleOAuth('google')}
-            disabled={isLoading}
-            className="flex h-[52px] items-center justify-center gap-3 rounded-full border-[1.5px] border-line bg-off-white text-[16px] font-semibold text-deep-green transition-colors hover:bg-pale-sage cursor-pointer disabled:cursor-default focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal"
-          >
-            <svg width="20" height="20" viewBox="0 0 18 18" aria-hidden="true">
-              <path
-                fill="#4285F4"
-                d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62z"
-              />
-              <path
-                fill="#34A853"
-                d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.84.86-3.04.86-2.34 0-4.33-1.58-5.04-3.7H.96v2.33A9 9 0 0 0 9 18z"
-              />
-              <path
-                fill="#FBBC05"
-                d="M3.96 10.72A5.4 5.4 0 0 1 3.68 9c0-.6.1-1.18.28-1.72V4.95H.96A9 9 0 0 0 0 9c0 1.45.35 2.83.96 4.05l3-2.33z"
-              />
-              <path
-                fill="#EA4335"
-                d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58A9 9 0 0 0 .96 4.95l3 2.33C4.67 5.16 6.66 3.58 9 3.58z"
-              />
-            </svg>
-            {copy.googleButton}
-          </button>
+                <div className="flex flex-col gap-2">
+                  <p className="m-0 text-[13px] font-semibold text-deep-green">
+                    Saved accounts on this device (up to 5):
+                  </p>
+                  <div className="flex flex-col gap-2">
+                    {savedAccounts.map((account) => {
+                      const isThisSwitching = isSwitching && switchingUserId === account.userId;
+                      return (
+                        <div
+                          key={account.userId}
+                          role="button"
+                          tabIndex={isSwitching ? -1 : 0}
+                          onClick={() => !isSwitching && handleQuickLogin(account)}
+                          onKeyDown={(e) => {
+                            if ((e.key === 'Enter' || e.key === ' ') && !isSwitching) {
+                              e.preventDefault();
+                              handleQuickLogin(account);
+                            }
+                          }}
+                          aria-disabled={isSwitching}
+                          aria-label={`Switch to account ${account.fullName || account.email}`}
+                          className={`group relative flex items-center justify-between gap-3 rounded-2xl bg-off-white border-[1.5px] border-line p-3 transition-colors text-left ${
+                            isSwitching
+                              ? 'opacity-60 cursor-not-allowed'
+                              : 'cursor-pointer hover:bg-pale-sage hover:border-teal/30 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-teal text-[14px] font-bold text-cream">
+                              {getInitials(account.fullName, account.email)}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="m-0 truncate text-[15px] font-semibold text-dark-teal">
+                                {account.fullName}
+                              </p>
+                              <p className="m-0 truncate text-[13px] text-muted">
+                                {account.email}
+                              </p>
+                              <p className="m-0 text-[12px] font-medium text-teal">
+                                {isThisSwitching ? 'Switching...' : 'Tap to continue'}
+                              </p>
+                            </div>
+                          </div>
 
-          <button
-            type="button"
-            onClick={() => handleOAuth('apple')}
-            disabled={isLoading}
-            className="flex h-[52px] items-center justify-center gap-3 rounded-full border-[1.5px] border-line bg-off-white text-[16px] font-semibold text-deep-green transition-colors hover:bg-pale-sage cursor-pointer disabled:cursor-default focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="#084B46" aria-hidden="true">
-              <path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701" />
-            </svg>
-            {copy.appleButton}
-          </button>
-        </div>
+                          <button
+                            type="button"
+                            disabled={isSwitching}
+                            onClick={(e) => handleRemoveSavedAccount(e, account)}
+                            aria-label={`Remove saved account for ${account.fullName || account.email}`}
+                            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-0 bg-transparent text-muted hover:bg-line/40 hover:text-error transition-colors cursor-pointer disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal"
+                          >
+                            <X size={16} aria-hidden="true" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
+            )}
+
+            <button
+              type="button"
+              onClick={() => router.push('/pikolscore?demo=1')}
+              disabled={isSwitching || isLoading}
+              className="flex h-[48px] w-full items-center justify-center gap-2 rounded-full bg-off-white border-[1.5px] border-line text-[15px] font-semibold text-dark-teal transition-colors hover:bg-pale-sage hover:border-teal/30 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal"
+            >
+              <Eye size={18} className="text-teal" aria-hidden="true" />
+              <span>View Courtside as Guest</span>
+            </button>
+          </div>
+        )}
 
         <p className="mt-6 text-center text-[15px] text-deep-green">
           {copy.footerPrompt}

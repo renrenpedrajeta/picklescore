@@ -12,8 +12,6 @@ export const AUTH_CONTENT = {
     forgotPassword: 'Forgot password?',
     submit: 'Sign in',
     submitting: 'Signing in...',
-    googleButton: 'Sign in with Google',
-    appleButton: 'Sign in with Apple',
     footerPrompt: "Don't have an account? ",
     footerLink: 'Sign Up',
   },
@@ -23,8 +21,6 @@ export const AUTH_CONTENT = {
     subtitle: 'Register to score and manage matches',
     submit: 'Sign up',
     submitting: 'Creating account...',
-    googleButton: 'Sign up with Google',
-    appleButton: 'Sign up with Apple',
     footerPrompt: 'Already have an account? ',
     footerLink: 'Sign In',
   },
@@ -48,8 +44,6 @@ export const AUTH_CONTENT = {
       placeholder: 'Re-enter your password',
     },
   },
-
-  divider: 'or continue with',
 
   courtPanel: {
     quote:

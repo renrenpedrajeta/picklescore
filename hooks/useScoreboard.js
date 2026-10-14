@@ -20,6 +20,7 @@ export function useScoreboard({
   keyboardShortcuts = true,
   elapsedSeconds = 0,
   onEscape,
+  isGuest = false,
 } = {}) {
   const [state, setState] = useState(null);
   const engineRef = useRef(null);
@@ -75,6 +76,7 @@ export function useScoreboard({
   }, [format, storageKey]);
 
   const point = useCallback(() => {
+    if (isGuest) return;
     const engine = engineRef.current;
     if (!engine) return;
     audioRef.current?.init();
@@ -86,9 +88,10 @@ export function useScoreboard({
     }
     vibrate(15);
     syncState();
-  }, [syncState]);
+  }, [isGuest, syncState]);
 
   const fault = useCallback(() => {
+    if (isGuest) return;
     const engine = engineRef.current;
     if (!engine) return;
     audioRef.current?.init();
@@ -96,33 +99,37 @@ export function useScoreboard({
     audioRef.current?.fault();
     vibrate([20, 40, 20]);
     syncState();
-  }, [syncState]);
+  }, [isGuest, syncState]);
 
   const undo = useCallback(() => {
+    if (isGuest) return;
     const engine = engineRef.current;
     if (!engine) return;
     if (engine.undo()) {
       syncState();
     }
-  }, [syncState]);
+  }, [isGuest, syncState]);
 
   const redo = useCallback(() => {
+    if (isGuest) return;
     const engine = engineRef.current;
     if (!engine) return;
     if (engine.redo()) {
       syncState();
     }
-  }, [syncState]);
+  }, [isGuest, syncState]);
 
   const reset = useCallback(() => {
+    if (isGuest) return;
     const engine = engineRef.current;
     if (!engine) return;
     engine.reset();
     syncState();
-  }, [syncState]);
+  }, [isGuest, syncState]);
 
   const setTeamName = useCallback(
     (teamIdx, name) => {
+      if (isGuest) return;
       const engine = engineRef.current;
       if (!engine || !name) return;
       const trimmed = name.trim();
@@ -130,23 +137,25 @@ export function useScoreboard({
       engine.setTeamName(teamIdx, trimmed);
       syncState();
     },
-    [syncState]
+    [isGuest, syncState]
   );
 
   const setTeamPalette = useCallback(
     (teamIdx, paletteKey) => {
+      if (isGuest) return;
       const engine = engineRef.current;
       if (!engine || !paletteKey) return;
       engine.setTeamPalette(teamIdx, paletteKey);
       syncState();
     },
-    [syncState]
+    [isGuest, syncState]
   );
 
   useEffect(() => {
-    if (!keyboardShortcuts) return;
+    if (!keyboardShortcuts || isGuest) return;
 
     const onKeyDown = (e) => {
+      if (isGuest) return;
       if (e.key === 'Escape') {
         onEscapeRef.current?.();
         return;
@@ -175,7 +184,7 @@ export function useScoreboard({
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [keyboardShortcuts, point, fault, undo, redo]);
+  }, [keyboardShortcuts, isGuest, point, fault, undo, redo]);
 
   return {
     state,
