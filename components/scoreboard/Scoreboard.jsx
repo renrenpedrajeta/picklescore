@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Eye } from 'lucide-react';
+import { Eye, AlertTriangle, X } from 'lucide-react';
 import { useScoreboard } from '../../hooks/useScoreboard';
 import { useMatchTimer } from '../../hooks/useMatchTimer';
+import { useMatchSync } from '../../hooks/useMatchSync';
 import Header from '../layout/Header';
 import ConsoleFooter from '../layout/ConsoleFooter';
 import ControlBar from './ControlBar';
@@ -13,6 +14,7 @@ import CallRow from './CallRow';
 import MatchLog from './MatchLog';
 import GameWonModal from './GameWonModal';
 import { supabase } from '@/config/supabase';
+import { PickleballEngine } from '@/lib/engine';
 
 export function Scoreboard() {
   const router = useRouter();
@@ -28,6 +30,17 @@ export function Scoreboard() {
       return search.get('demo') === '1';
     }
     return false;
+  });
+
+  const engineRef = useRef(null);
+  if (!engineRef.current) {
+    engineRef.current = new PickleballEngine({ format: 'doubles' });
+  }
+
+  // Cloud sync coordinator hook
+  const sync = useMatchSync({
+    engineRef,
+    isGuest,
   });
 
   useEffect(() => {
@@ -65,7 +78,9 @@ export function Scoreboard() {
     checkAuthAndProfile();
   }, [router]);
 
-  const timer = useMatchTimer();
+  const timer = useMatchTimer({
+    sync,
+  });
 
   const handleCloseLog = useCallback(() => {
     setLogOpen(false);
@@ -99,6 +114,8 @@ export function Scoreboard() {
     elapsedSeconds: timer.elapsedSeconds,
     onEscape: handleEscape,
     isGuest,
+    sync,
+    engineRef,
   });
 
   // Automatically pause timer and trigger GameWonModal when a team wins
@@ -111,13 +128,39 @@ export function Scoreboard() {
     }
   }, [state?.gameOver]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Auto-initialize cloud session only after discovery completes and none is found
+  useEffect(() => {
+    if (
+      sync?.isEnabled &&
+      !sync.isLoadingSession &&
+      !sync.sessionId &&
+      engineRef.current &&
+      !isGuest &&
+      profile
+    ) {
+      sync.createSession(engineRef.current, timer.durationMs);
+    }
+  }, [sync?.isEnabled, sync?.isLoadingSession, sync?.sessionId, isGuest, profile, timer.durationMs]);
+
   // Score & control guards for Guest Mode
-  const handleNewMatch = useCallback(() => {
+  const handleNewMatch = useCallback(async () => {
     if (isGuest) return;
-    reset();
-    timer.reset();
-    setGameWonModalOpen(false);
-  }, [isGuest, reset, timer]);
+
+    if (sync?.isEnabled && sync.sessionId) {
+      const isCompleted = state?.gameOver;
+      await sync.closeSession(isCompleted ? 'completed' : 'abandoned');
+      reset();
+      timer.reset();
+      setGameWonModalOpen(false);
+      if (engineRef.current) {
+        await sync.createSession(engineRef.current, timer.durationMs);
+      }
+    } else {
+      reset();
+      timer.reset();
+      setGameWonModalOpen(false);
+    }
+  }, [isGuest, reset, timer, sync, state?.gameOver]);
 
   const handleUndoWinningPoint = useCallback(() => {
     if (isGuest) return;
@@ -175,16 +218,41 @@ export function Scoreboard() {
         </div>
       )}
 
-      {/* 2. Header remains outside the disabled/inert wrapper */}
+      {/* 2. Version Conflict / Sync Alert Toast */}
+      {sync?.toastMessage && (
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="flex items-center justify-between gap-3 bg-[#FEECD6] border-b border-[#E2E5DC] px-4 py-2 text-[13px] font-medium text-[#203F39]"
+        >
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={16} className="text-[#BA1A1A] shrink-0" aria-hidden="true" />
+            <span>{sync.toastMessage}</span>
+          </div>
+          <button
+            type="button"
+            onClick={sync.clearToast}
+            className="p-1 text-[#748079] hover:text-[#203F39] rounded"
+            aria-label="Dismiss alert"
+          >
+            <X size={15} />
+          </button>
+        </div>
+      )}
+
+      {/* 3. Header remains outside the disabled/inert wrapper */}
       <Header
         onOpenLog={() => !isGuest && setLogOpen(true)}
         profile={profile}
         userEmail={userEmail}
         isGuest={isGuest}
+        syncStatus={sync?.syncStatus}
+        pendingCount={sync?.pendingCount}
+        isCloudSync={sync?.isEnabled}
         inert={gameWonModalOpen || undefined}
       />
 
-      {/* 3. Main scoreboard & game controls put behind glass for guests */}
+      {/* 4. Main scoreboard & game controls put behind glass for guests */}
       <div
         inert={isGuest || undefined}
         className={`flex-1 flex flex-col min-h-0 ${isGuest ? 'pointer-events-none select-none' : ''}`}
@@ -249,6 +317,7 @@ export function Scoreboard() {
         <MatchLog
           open={logOpen}
           entries={log}
+          legacyEntries={sync?.legacyLog || []}
           onClose={handleCloseLog}
           inert={gameWonModalOpen || undefined}
         />

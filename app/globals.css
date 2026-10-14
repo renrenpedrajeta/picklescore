@@ -1290,3 +1290,74 @@ body {
   color: #748079;
   letter-spacing: 0.05em;
 }
+
+/* Cloud Sync Status Badge & Legacy Log Drawer Styles */
+.ps-sync-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 44px;
+  box-sizing: border-box;
+  padding: 0 18px;
+  border-radius: 9999px;
+  border: 1.5px solid var(--ps-border);
+  background-color: var(--ps-card);
+  color: var(--ps-ink);
+  font-family: 'Outfit', system-ui, sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  user-select: none;
+  transition: all 0.2s ease;
+}
+
+.ps-sync-pill.ps-sync-synced {
+  border-color: #BBF7D0;
+  background-color: #F0FDF4;
+  color: #166534;
+}
+
+.ps-sync-pill.ps-sync-syncing {
+  border-color: #FDE68A;
+  background-color: #FFFBEB;
+  color: #92400E;
+}
+
+.ps-sync-pill.ps-sync-offline {
+  border-color: #E2E5DC;
+  background-color: #FAF9F5;
+  color: #748079;
+}
+
+.ps-sync-pill.ps-sync-error {
+  border-color: #FECACA;
+  background-color: #FEF2F2;
+  color: #991B1B;
+}
+
+.ps-legacy-log-section {
+  padding: 10px 16px 0;
+  background-color: #FAF9F5;
+  border-bottom: 1px dashed var(--ps-border);
+  margin-bottom: 8px;
+}
+
+.ps-legacy-log-badge {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ps-muted);
+  margin-bottom: 6px;
+}
+
+.ps-log-item-legacy {
+  opacity: 0.75;
+  font-style: italic;
+}
+
+.ps-legacy-divider {
+  height: 1px;
+  background-color: var(--ps-border);
+  margin-top: 8px;
+}

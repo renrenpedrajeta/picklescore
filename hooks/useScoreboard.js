@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { PickleballEngine } from '../lib/engine';
 import { WebAudioSynth, getSynth } from '../lib/audio';
+import { engineToRallyState } from '../lib/hydrate';
 
 function vibrate(pattern) {
   try {
@@ -21,9 +22,12 @@ export function useScoreboard({
   elapsedSeconds = 0,
   onEscape,
   isGuest = false,
+  sync = null,
+  engineRef: externalEngineRef = null,
 } = {}) {
   const [state, setState] = useState(null);
-  const engineRef = useRef(null);
+  const localEngineRef = useRef(null);
+  const engineRef = externalEngineRef || localEngineRef;
   const audioRef = useRef(null);
 
   const elapsedSecondsRef = useRef(elapsedSeconds);
@@ -37,43 +41,60 @@ export function useScoreboard({
     if (!engine) return;
     const s = engine.getState();
     setState(s);
-    try {
-      localStorage.setItem(
-        storageKey,
-        JSON.stringify({
-          snapshot: engine.saveSnapshot(),
-          history: engine.history,
-          redoStack: engine.redoStack,
-        })
-      );
-    } catch {
-      // Ignore storage write error
-    }
-  }, [storageKey]);
 
+    // Stop writing to localStorage when Cloud Sync is enabled
+    if (!sync?.isEnabled) {
+      try {
+        localStorage.setItem(
+          storageKey,
+          JSON.stringify({
+            snapshot: engine.saveSnapshot(),
+            history: engine.history,
+            redoStack: engine.redoStack,
+          })
+        );
+      } catch {
+        // Ignore storage write error
+      }
+    }
+  }, [storageKey, sync?.isEnabled, engineRef]);
+
+  // Initial engine setup
   useEffect(() => {
     audioRef.current = getSynth() || new WebAudioSynth();
-    const inst = new PickleballEngine({ format });
 
-    try {
-      const saved = localStorage.getItem(storageKey);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed && parsed.snapshot) {
-          inst.restoreSnapshot(parsed.snapshot);
-          inst.history = Array.isArray(parsed.history) ? parsed.history : [];
-          inst.redoStack = Array.isArray(parsed.redoStack) ? parsed.redoStack : [];
-        } else {
-          inst.restoreSnapshot(saved);
-        }
-      }
-    } catch {
-      // Ignore storage read error
+    if (!engineRef.current) {
+      engineRef.current = new PickleballEngine({ format });
     }
 
-    engineRef.current = inst;
-    setState(inst.getState());
-  }, [format, storageKey]);
+    // Fallback to localStorage only when cloud sync is disabled
+    if (!sync?.isEnabled) {
+      try {
+        const saved = localStorage.getItem(storageKey);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed && parsed.snapshot) {
+            engineRef.current.restoreSnapshot(parsed.snapshot);
+            engineRef.current.history = Array.isArray(parsed.history) ? parsed.history : [];
+            engineRef.current.redoStack = Array.isArray(parsed.redoStack) ? parsed.redoStack : [];
+          } else {
+            engineRef.current.restoreSnapshot(saved);
+          }
+        }
+      } catch {
+        // Ignore storage read error
+      }
+    }
+
+    setState(engineRef.current.getState());
+  }, [format, storageKey, sync?.isEnabled, engineRef]);
+
+  // Keep state synchronized whenever cloud rehydration finishes
+  useEffect(() => {
+    if (engineRef.current) {
+      setState(engineRef.current.getState());
+    }
+  }, [sync?.rehydrateVersion, sync?.serverSession, engineRef]);
 
   const point = useCallback(() => {
     if (isGuest) return;
@@ -88,18 +109,46 @@ export function useScoreboard({
     }
     vibrate(15);
     syncState();
-  }, [isGuest, syncState]);
+
+    if (sync?.isEnabled && res?.logEntry) {
+      sync.recordRally({
+        eventId:
+          typeof crypto !== 'undefined' && crypto.randomUUID
+            ? crypto.randomUUID()
+            : null,
+        eventType: res.event === 'gameWon' ? 'gameWon' : 'point',
+        elapsedSeconds: elapsedSecondsRef.current,
+        stateAfter: engineToRallyState(engine),
+        callString: res.logEntry.call,
+        message: res.logEntry.message,
+      });
+    }
+  }, [isGuest, syncState, sync, engineRef]);
 
   const fault = useCallback(() => {
     if (isGuest) return;
     const engine = engineRef.current;
     if (!engine) return;
     audioRef.current?.init();
-    engine.fault(elapsedSecondsRef.current);
+    const res = engine.fault(elapsedSecondsRef.current);
     audioRef.current?.fault();
     vibrate([20, 40, 20]);
     syncState();
-  }, [isGuest, syncState]);
+
+    if (sync?.isEnabled && res?.logEntry) {
+      sync.recordRally({
+        eventId:
+          typeof crypto !== 'undefined' && crypto.randomUUID
+            ? crypto.randomUUID()
+            : null,
+        eventType: res.event === 'secondServer' ? 'secondServer' : 'sideOut',
+        elapsedSeconds: elapsedSecondsRef.current,
+        stateAfter: engineToRallyState(engine),
+        callString: res.logEntry.call,
+        message: res.logEntry.message,
+      });
+    }
+  }, [isGuest, syncState, sync, engineRef]);
 
   const undo = useCallback(() => {
     if (isGuest) return;
@@ -107,8 +156,11 @@ export function useScoreboard({
     if (!engine) return;
     if (engine.undo()) {
       syncState();
+      if (sync?.isEnabled) {
+        sync.undo();
+      }
     }
-  }, [isGuest, syncState]);
+  }, [isGuest, syncState, sync, engineRef]);
 
   const redo = useCallback(() => {
     if (isGuest) return;
@@ -116,8 +168,11 @@ export function useScoreboard({
     if (!engine) return;
     if (engine.redo()) {
       syncState();
+      if (sync?.isEnabled) {
+        sync.redo();
+      }
     }
-  }, [isGuest, syncState]);
+  }, [isGuest, syncState, sync, engineRef]);
 
   const reset = useCallback(() => {
     if (isGuest) return;
@@ -125,7 +180,7 @@ export function useScoreboard({
     if (!engine) return;
     engine.reset();
     syncState();
-  }, [isGuest, syncState]);
+  }, [isGuest, syncState, engineRef]);
 
   const setTeamName = useCallback(
     (teamIdx, name) => {
@@ -136,8 +191,15 @@ export function useScoreboard({
       if (!trimmed) return;
       engine.setTeamName(teamIdx, trimmed);
       syncState();
+
+      if (sync?.isEnabled) {
+        sync.updateSessionMeta({
+          teamNames: engine.teamNames,
+          teamPalettes: engine.teamPalettes,
+        });
+      }
     },
-    [isGuest, syncState]
+    [isGuest, syncState, sync, engineRef]
   );
 
   const setTeamPalette = useCallback(
@@ -147,8 +209,15 @@ export function useScoreboard({
       if (!engine || !paletteKey) return;
       engine.setTeamPalette(teamIdx, paletteKey);
       syncState();
+
+      if (sync?.isEnabled) {
+        sync.updateSessionMeta({
+          teamNames: engine.teamNames,
+          teamPalettes: engine.teamPalettes,
+        });
+      }
     },
-    [isGuest, syncState]
+    [isGuest, syncState, sync, engineRef]
   );
 
   useEffect(() => {
@@ -188,6 +257,7 @@ export function useScoreboard({
 
   return {
     state,
+    engineRef,
     servingTeam: state?.servingTeam ?? 0,
     servingTeamKey: state?.servingTeamKey ?? 'omega',
     log: state?.log ?? [],
@@ -205,3 +275,5 @@ export function useScoreboard({
     setTeamPalette,
   };
 }
+
+export default useScoreboard;

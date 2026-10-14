@@ -2,14 +2,24 @@
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { LogOut, User } from 'lucide-react';
+import { LogOut, User, Cloud, CloudOff, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { supabase } from '@/config/supabase';
 import {
   saveAccountForQuickSwitch,
   detachActiveSupabaseSession,
 } from '@/lib/auth-session';
 
-export function Header({ onOpenLog, profile, userEmail, onLogout, isGuest = false, ...rest }) {
+export function Header({
+  onOpenLog,
+  profile,
+  userEmail,
+  onLogout,
+  isGuest = false,
+  syncStatus = 'synced',
+  pendingCount = 0,
+  isCloudSync = false,
+  ...rest
+}) {
   const router = useRouter();
 
   // 1. Cross-Tab Logout Synchronization Listener
@@ -34,7 +44,6 @@ export function Header({ onOpenLog, profile, userEmail, onLogout, isGuest = fals
 
   // 2. Soft Logout + In-Memory Purge & Hard Redirect
   const handleLogout = async () => {
-    // 1. Early Return for Guest Spectators (?demo=1 or isGuest)
     if (isGuestSpectator) {
       if (typeof onLogout === 'function') {
         try {
@@ -47,7 +56,6 @@ export function Header({ onOpenLog, profile, userEmail, onLogout, isGuest = fals
       return;
     }
 
-    // 2. Standard Soft Logout for Authenticated Umpires (NOT ?demo=1)
     try {
       const {
         data: { session },
@@ -97,6 +105,47 @@ export function Header({ onOpenLog, profile, userEmail, onLogout, isGuest = fals
       </div>
 
       <div className="ps-header-actions">
+        {/* Sync Status Badge when Cloud Sync is active */}
+        {isCloudSync && !isGuestSpectator && (
+          <div
+            className={`ps-sync-pill ps-sync-${syncStatus}`}
+            title={
+              syncStatus === 'synced'
+                ? 'All actions synced to cloud'
+                : syncStatus === 'syncing'
+                ? `Syncing ${pendingCount} action${pendingCount === 1 ? '' : 's'}...`
+                : syncStatus === 'offline'
+                ? `Offline: ${pendingCount} pending action${pendingCount === 1 ? '' : 's'}`
+                : 'Cloud sync error'
+            }
+          >
+            {syncStatus === 'synced' && (
+              <>
+                <CheckCircle2 size={14} className="text-[#15803D]" aria-hidden="true" />
+                <span>Synced</span>
+              </>
+            )}
+            {syncStatus === 'syncing' && (
+              <>
+                <RefreshCw size={14} className="text-[#D97706] animate-spin" aria-hidden="true" />
+                <span>Syncing ({pendingCount})</span>
+              </>
+            )}
+            {syncStatus === 'offline' && (
+              <>
+                <CloudOff size={14} className="text-[#748079]" aria-hidden="true" />
+                <span>Offline ({pendingCount} pending)</span>
+              </>
+            )}
+            {syncStatus === 'error' && (
+              <>
+                <Cloud size={14} className="text-[#BA1A1A]" aria-hidden="true" />
+                <span>Sync error</span>
+              </>
+            )}
+          </div>
+        )}
+
         <button
           type="button"
           className={`ps-pill ${isGuestSpectator ? 'opacity-50 cursor-not-allowed pointer-events-none' : ''}`}

@@ -17,6 +17,7 @@ export function useMatchTimer({
   durationMs = MATCH_DURATION_MS,
   storageKey = 'pikolscore_timer_v2',
   onExpire,
+  sync = null,
 } = {}) {
   const [status, setStatus] = useState('idle'); // 'idle' | 'running' | 'paused' | 'expired'
   const [remainingMs, setRemainingMs] = useState(durationMs);
@@ -35,23 +36,39 @@ export function useMatchTimer({
 
   const persist = useCallback(
     (currentStatus, currentRemaining, currentEndsAt) => {
-      try {
-        localStorage.setItem(
-          storageKey,
-          JSON.stringify({
-            status: currentStatus,
-            remainingMs: currentRemaining,
-            endsAt: currentEndsAt,
-          })
-        );
-      } catch {
-        // Ignore localStorage write error
+      // LocalStorage persistence only when cloud sync is disabled
+      if (!sync?.isEnabled) {
+        try {
+          localStorage.setItem(
+            storageKey,
+            JSON.stringify({
+              status: currentStatus,
+              remainingMs: currentRemaining,
+              endsAt: currentEndsAt,
+            })
+          );
+        } catch {
+          // Ignore localStorage write error
+        }
+      }
+
+      // Supabase timer sync when enabled
+      if (sync?.isEnabled && sync.setTimer) {
+        sync.setTimer({
+          status: currentStatus,
+          remainingMs: currentRemaining,
+          endsAt: currentEndsAt,
+          clientTs: new Date().toISOString(),
+        });
       }
     },
-    [storageKey]
+    [storageKey, sync]
   );
 
+  // Local mount hydration (when cloud sync is disabled)
   useEffect(() => {
+    if (sync?.isEnabled) return;
+
     try {
       const saved = localStorage.getItem(storageKey);
       if (saved) {
@@ -98,7 +115,50 @@ export function useMatchTimer({
     } catch {
       // Ignore localStorage read errors
     }
-  }, [storageKey, durationMs, persist]);
+  }, [storageKey, durationMs, persist, sync?.isEnabled]);
+
+  // Cloud timer hydration (when server session is fetched or updated)
+  useEffect(() => {
+    if (!sync?.isEnabled || !sync?.serverSession) return;
+    const sess = sync.serverSession;
+
+    if (sess.timer_status === 'running' && sess.timer_ends_at) {
+      const ends = new Date(sess.timer_ends_at).getTime();
+      const rem = Math.max(0, ends - Date.now());
+      if (rem <= 0) {
+        statusRef.current = 'expired';
+        remainingMsRef.current = 0;
+        endsAtRef.current = null;
+        setStatus('expired');
+        setRemainingMs(0);
+      } else {
+        statusRef.current = 'running';
+        remainingMsRef.current = rem;
+        endsAtRef.current = ends;
+        setStatus('running');
+        setRemainingMs(rem);
+      }
+    } else if (sess.timer_status === 'paused') {
+      const rem = sess.timer_remaining_ms ?? durationMs;
+      statusRef.current = 'paused';
+      remainingMsRef.current = rem;
+      endsAtRef.current = null;
+      setStatus('paused');
+      setRemainingMs(rem);
+    } else if (sess.timer_status === 'expired') {
+      statusRef.current = 'expired';
+      remainingMsRef.current = 0;
+      endsAtRef.current = null;
+      setStatus('expired');
+      setRemainingMs(0);
+    } else if (sess.timer_status === 'idle') {
+      statusRef.current = 'idle';
+      remainingMsRef.current = durationMs;
+      endsAtRef.current = null;
+      setStatus('idle');
+      setRemainingMs(durationMs);
+    }
+  }, [sync?.isEnabled, sync?.serverSession, durationMs]);
 
   const start = useCallback(() => {
     if (statusRef.current === 'running') return;
@@ -274,6 +334,7 @@ export function useMatchTimer({
     remainingMs,
     remainingSeconds,
     elapsedSeconds,
+    durationMs,
     formattedTime,
     label,
     progress,
@@ -285,3 +346,5 @@ export function useMatchTimer({
     reset,
   };
 }
+
+export default useMatchTimer;
