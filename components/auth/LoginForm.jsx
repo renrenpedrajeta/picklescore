@@ -121,30 +121,22 @@ export function LoginForm({ initialMode = 'signin' }) {
 
       const userId = data.session.user.id;
 
-      // Verify 7-day server-side activity boundary on public.profiles
-      const { data: profile, error: profileErr } = await supabase
+      // Verify 7-day activity boundary and stamp fresh activity in 1 atomic round-trip
+      const cutoffIso = new Date(Date.now() - SEVEN_DAYS_MS).toISOString();
+      const { data: updatedProfile, error: profileErr } = await supabase
         .from('profiles')
-        .select('last_active_at')
+        .update({ last_active_at: new Date().toISOString() })
         .eq('id', userId)
-        .single();
+        .gte('last_active_at', cutoffIso)
+        .select('id')
+        .maybeSingle();
 
-      const isServerExpired =
-        profileErr ||
-        !profile?.last_active_at ||
-        Date.now() - new Date(profile.last_active_at).getTime() > SEVEN_DAYS_MS;
-
-      if (isServerExpired) {
+      if (profileErr || !updatedProfile) {
         // Officially terminate the stale session via Supabase Auth API
         await supabase.auth.signOut();
         handleExpiredFallback(account);
         return;
       }
-
-      // Valid session: stamp fresh activity and remove from saved_accounts while active
-      await supabase
-        .from('profiles')
-        .update({ last_active_at: new Date().toISOString() })
-        .eq('id', userId);
 
       removeSavedAccount(account.userId);
       router.replace('/pikolscore');

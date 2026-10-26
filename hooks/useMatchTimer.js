@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getSynth } from '../lib/audio';
+import { outbox } from '../lib/outbox';
 
 export const MATCH_DURATION_MS =
   Number(process.env.NEXT_PUBLIC_MATCH_DURATION_MS) || 30 * 60 * 1000;
@@ -104,6 +105,7 @@ export function useMatchTimer({
           endsAtRef.current = null;
           setStatus('expired');
           setRemainingMs(0);
+          onExpireRef.current?.();
         } else {
           statusRef.current = 'idle';
           remainingMsRef.current = durationMs;
@@ -120,6 +122,11 @@ export function useMatchTimer({
   // Cloud timer hydration (when server session is fetched or updated)
   useEffect(() => {
     if (!sync?.isEnabled || !sync?.serverSession) return;
+    // Do not overwrite local timer state while a timer mutation is still in flight in the outbox
+    if (!sync.isGuest && outbox.getQueue().some((q) => q.op === 'fn_set_timer')) {
+      return;
+    }
+
     const sess = sync.serverSession;
 
     if (sess.timer_status === 'running' && sess.timer_ends_at) {
@@ -131,12 +138,21 @@ export function useMatchTimer({
         endsAtRef.current = null;
         setStatus('expired');
         setRemainingMs(0);
+        onExpireRef.current?.();
       } else {
+        // Avoid minor visual jitter on rally updates if already running within 3s of server endsAt
+        const isAlreadyAligned =
+          statusRef.current === 'running' &&
+          endsAtRef.current &&
+          Math.abs(endsAtRef.current - ends) < 3000;
+
         statusRef.current = 'running';
-        remainingMsRef.current = rem;
-        endsAtRef.current = ends;
         setStatus('running');
-        setRemainingMs(rem);
+        if (!isAlreadyAligned) {
+          remainingMsRef.current = rem;
+          endsAtRef.current = ends;
+          setRemainingMs(rem);
+        }
       }
     } else if (sess.timer_status === 'paused') {
       const rem = sess.timer_remaining_ms ?? durationMs;
@@ -151,6 +167,7 @@ export function useMatchTimer({
       endsAtRef.current = null;
       setStatus('expired');
       setRemainingMs(0);
+      onExpireRef.current?.();
     } else if (sess.timer_status === 'idle') {
       statusRef.current = 'idle';
       remainingMsRef.current = durationMs;
@@ -158,21 +175,26 @@ export function useMatchTimer({
       setStatus('idle');
       setRemainingMs(durationMs);
     }
-  }, [sync?.isEnabled, sync?.serverSession, durationMs]);
+  }, [sync?.isEnabled, sync?.isGuest, sync?.serverSession, durationMs]);
 
-  const start = useCallback(() => {
-    if (statusRef.current === 'running') return;
-    const rem =
-      remainingMsRef.current > 0 ? remainingMsRef.current : durationMsRef.current;
-    const endsAt = Date.now() + rem;
-    endsAtRef.current = endsAt;
-    remainingMsRef.current = rem;
-    statusRef.current = 'running';
+  const start = useCallback(
+    (forceRestart = false) => {
+      if (statusRef.current === 'running' && !forceRestart) return;
+      const rem =
+        forceRestart === true || remainingMsRef.current <= 0
+          ? durationMsRef.current
+          : remainingMsRef.current;
+      const endsAt = Date.now() + rem;
+      endsAtRef.current = endsAt;
+      remainingMsRef.current = rem;
+      statusRef.current = 'running';
 
-    setRemainingMs(rem);
-    setStatus('running');
-    persist('running', rem, endsAt);
-  }, [persist]);
+      setRemainingMs(rem);
+      setStatus('running');
+      persist('running', rem, endsAt);
+    },
+    [persist]
+  );
 
   const pause = useCallback(() => {
     if (statusRef.current !== 'running') return;
@@ -204,16 +226,21 @@ export function useMatchTimer({
     persist('running', rem, endsAt);
   }, [persist]);
 
-  const reset = useCallback(() => {
-    endsAtRef.current = null;
-    lastTickSecRef.current = null;
-    remainingMsRef.current = durationMsRef.current;
-    statusRef.current = 'idle';
+  const reset = useCallback(
+    (syncToCloud = true) => {
+      endsAtRef.current = null;
+      lastTickSecRef.current = null;
+      remainingMsRef.current = durationMsRef.current;
+      statusRef.current = 'idle';
 
-    setRemainingMs(durationMsRef.current);
-    setStatus('idle');
-    persist('idle', durationMsRef.current, null);
-  }, [persist]);
+      setRemainingMs(durationMsRef.current);
+      setStatus('idle');
+      if (syncToCloud) {
+        persist('idle', durationMsRef.current, null);
+      }
+    },
+    [persist]
+  );
 
   const toggle = useCallback(() => {
     if (statusRef.current === 'running') {

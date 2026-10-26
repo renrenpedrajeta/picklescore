@@ -13,19 +13,25 @@ export type Database = {
         Row: {
           id: string;
           full_name: string | null;
-          username: string | null;
+          role: 'referee' | 'player' | null;
+          avatar_url: string | null;
+          created_at: string;
           last_active_at: string | null;
         };
         Insert: {
           id: string;
           full_name?: string | null;
-          username?: string | null;
+          role?: 'referee' | 'player' | null;
+          avatar_url?: string | null;
+          created_at?: string;
           last_active_at?: string | null;
         };
         Update: {
           id?: string;
           full_name?: string | null;
-          username?: string | null;
+          role?: 'referee' | 'player' | null;
+          avatar_url?: string | null;
+          created_at?: string;
           last_active_at?: string | null;
         };
         Relationships: [];

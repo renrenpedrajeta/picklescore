@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/config/supabase';
 import { outbox } from '@/lib/outbox';
-import { sessionToEngine, engineToRallyState } from '@/lib/hydrate';
+import { sessionToEngine, headSessionToEngine, engineToRallyState } from '@/lib/hydrate';
 
 const ACTIVE_SESSION_KEY = 'pikolscore_active_session_id';
 const V3_STORAGE_KEY = 'pikolscore_v3';
@@ -19,6 +19,8 @@ export function useMatchSync({ engineRef, timerRef, isGuest = false }) {
     }
     return null;
   });
+  const sessionIdRef = useRef(sessionId);
+  sessionIdRef.current = sessionId;
 
   const [localVersion, setLocalVersion] = useState(0);
   const localVersionRef = useRef(0);
@@ -53,6 +55,9 @@ export function useMatchSync({ engineRef, timerRef, isGuest = false }) {
           }
           return { data: null, error };
         }
+        if (data && data.id && data.id === sessionIdRef.current) {
+          setServerSession(data);
+        }
         return { data, error: null };
       } catch (networkErr) {
         return { data: null, error: networkErr };
@@ -74,7 +79,8 @@ export function useMatchSync({ engineRef, timerRef, isGuest = false }) {
     async (knownSession = null, targetSessionId = null) => {
       const currentId =
         targetSessionId ||
-        sessionId ||
+        knownSession?.id ||
+        sessionIdRef.current ||
         (typeof window !== 'undefined'
           ? new URLSearchParams(window.location.search).get('session') ||
             window.localStorage.getItem(ACTIVE_SESSION_KEY)
@@ -129,7 +135,7 @@ export function useMatchSync({ engineRef, timerRef, isGuest = false }) {
         return null;
       }
     },
-    [sessionId, engineRef]
+    [engineRef]
   );
 
   // Subscribe to outbox error events (conflict 40001 handling and recovery)
@@ -156,11 +162,15 @@ export function useMatchSync({ engineRef, timerRef, isGuest = false }) {
         outbox.resume();
         setToastMessage('Action not permitted on this session.');
       } else if (code === 'P0001') {
-        // Session closed
-        outbox.filterQueue((q) => q.id !== item.id);
-        await refetchAndRehydrate();
+        // Session closed — drop stale ops for that closed session without showing a false error toast
+        const closedId = item?.args?.p_session_id;
+        outbox.filterQueue(
+          (q) => q.id !== item.id && (!closedId || q.args?.p_session_id !== closedId)
+        );
+        if (closedId && closedId === sessionIdRef.current) {
+          await refetchAndRehydrate();
+        }
         outbox.resume();
-        setToastMessage('This match session is already closed.');
       } else if (code === 'P0002') {
         // Nothing to undo or redo
         outbox.filterQueue((q) => q.id !== item.id);
@@ -295,6 +305,7 @@ export function useMatchSync({ engineRef, timerRef, isGuest = false }) {
         typeof window !== 'undefined'
           ? new URLSearchParams(window.location.search).get('session')
           : null;
+      let discoveredSession = null;
 
       // 2. If authenticated umpire, prioritize their active in_progress match from cloud
       if (!activeId && user && !isGuest) {
@@ -310,6 +321,7 @@ export function useMatchSync({ engineRef, timerRef, isGuest = false }) {
 
           if (latestActive?.id) {
             activeId = latestActive.id;
+            discoveredSession = latestActive;
             if (typeof window !== 'undefined') {
               const localId = window.localStorage.getItem(ACTIVE_SESSION_KEY);
               if (localId !== activeId) {
@@ -340,8 +352,8 @@ export function useMatchSync({ engineRef, timerRef, isGuest = false }) {
         activeId = window.localStorage.getItem(ACTIVE_SESSION_KEY) || null;
       }
 
-      // 5. Multi-device discovery for spectator/guest if still no activeId
-      if (!activeId) {
+      // 5. Multi-device discovery ONLY for spectator/guest if still no activeId
+      if (!activeId && isGuest) {
         try {
           const { data: publicActive } = await supabase
             .from('match_sessions')
@@ -353,6 +365,7 @@ export function useMatchSync({ engineRef, timerRef, isGuest = false }) {
 
           if (publicActive?.id) {
             activeId = publicActive.id;
+            discoveredSession = publicActive;
             if (typeof window !== 'undefined') {
               window.localStorage.setItem(ACTIVE_SESSION_KEY, activeId);
             }
@@ -366,11 +379,13 @@ export function useMatchSync({ engineRef, timerRef, isGuest = false }) {
 
       if (activeId) {
         setSessionId(activeId);
-        const res = await refetchAndRehydrate(null, activeId);
+        sessionIdRef.current = activeId;
+        const res = await refetchAndRehydrate(discoveredSession, activeId);
         // If session could not be retrieved, clear stale local storage key
         if (!res && typeof window !== 'undefined') {
           window.localStorage.removeItem(ACTIVE_SESSION_KEY);
           setSessionId(null);
+          sessionIdRef.current = null;
         }
       }
 
@@ -405,13 +420,20 @@ export function useMatchSync({ engineRef, timerRef, isGuest = false }) {
           // Always sync the serverSession state so timer and badges update immediately
           setServerSession(newRow);
 
-          // When version > localVersion or spectator mode, rehydrate scoreboard & match log
-          // as long as there are no in-flight rally taps queued locally
-          if (
-            (Number(newRow.version) > localVersionRef.current || isGuest) &&
-            !outbox.hasPendingRallies()
-          ) {
-            await refetchAndRehydrate(newRow);
+          const newVersion = Number(newRow.version) || 0;
+          if (newVersion > localVersionRef.current) {
+            localVersionRef.current = newVersion;
+            setLocalVersion(newVersion);
+
+            if (isGuest) {
+              // Spectators update directly from the row payload — zero extra queries!
+              if (engineRef?.current) {
+                headSessionToEngine(engineRef.current, newRow);
+                setRehydrateVersion((v) => v + 1);
+              }
+            } else if (!outbox.hasPendingRallies()) {
+              await refetchAndRehydrate(newRow);
+            }
           }
         }
       )
@@ -465,9 +487,12 @@ export function useMatchSync({ engineRef, timerRef, isGuest = false }) {
         if (typeof window !== 'undefined') {
           window.localStorage.setItem(ACTIVE_SESSION_KEY, newId);
         }
+        // Purge any leftover queued ops from prior sessions
+        outbox.filterQueue((q) => !q.args?.p_session_id || q.args.p_session_id === newId);
+        sessionIdRef.current = newId;
         setSessionId(newId);
-        setLocalVersion(data?.version || 1);
         localVersionRef.current = data?.version || 1;
+        setLocalVersion(data?.version || 1);
         setServerSession(data);
         return newId;
       } catch (err) {
@@ -481,7 +506,8 @@ export function useMatchSync({ engineRef, timerRef, isGuest = false }) {
   // Record a rally event (Point / Fault / GameWon)
   const recordRally = useCallback(
     ({ eventId, eventType, elapsedSeconds, stateAfter, callString, message }) => {
-      if (!isEnabled || !sessionId || isGuest) return;
+      const currentSessionId = sessionIdRef.current || sessionId;
+      if (!isEnabled || !currentSessionId || isGuest) return;
 
       const expectedVersion = localVersionRef.current;
       localVersionRef.current += 1;
@@ -490,7 +516,7 @@ export function useMatchSync({ engineRef, timerRef, isGuest = false }) {
       outbox.enqueue({
         op: 'fn_record_rally',
         args: {
-          p_session_id: sessionId,
+          p_session_id: currentSessionId,
           p_event_id:
             eventId ||
             (typeof crypto !== 'undefined' && crypto.randomUUID
@@ -511,7 +537,8 @@ export function useMatchSync({ engineRef, timerRef, isGuest = false }) {
 
   // Undo
   const undo = useCallback(() => {
-    if (!isEnabled || !sessionId || isGuest) return;
+    const currentSessionId = sessionIdRef.current || sessionId;
+    if (!isEnabled || !currentSessionId || isGuest) return;
 
     const expectedVersion = localVersionRef.current;
     localVersionRef.current += 1;
@@ -520,7 +547,7 @@ export function useMatchSync({ engineRef, timerRef, isGuest = false }) {
     outbox.enqueue({
       op: 'fn_undo_rally',
       args: {
-        p_session_id: sessionId,
+        p_session_id: currentSessionId,
         p_expected_version: expectedVersion,
       },
       expectedVersion,
@@ -529,7 +556,8 @@ export function useMatchSync({ engineRef, timerRef, isGuest = false }) {
 
   // Redo
   const redo = useCallback(() => {
-    if (!isEnabled || !sessionId || isGuest) return;
+    const currentSessionId = sessionIdRef.current || sessionId;
+    if (!isEnabled || !currentSessionId || isGuest) return;
 
     const expectedVersion = localVersionRef.current;
     localVersionRef.current += 1;
@@ -538,7 +566,7 @@ export function useMatchSync({ engineRef, timerRef, isGuest = false }) {
     outbox.enqueue({
       op: 'fn_redo_rally',
       args: {
-        p_session_id: sessionId,
+        p_session_id: currentSessionId,
         p_expected_version: expectedVersion,
       },
       expectedVersion,
@@ -548,12 +576,13 @@ export function useMatchSync({ engineRef, timerRef, isGuest = false }) {
   // Set Timer
   const setTimer = useCallback(
     ({ status, remainingMs, endsAt, clientTs }) => {
-      if (!isEnabled || !sessionId || isGuest) return;
+      const currentSessionId = sessionIdRef.current || sessionId;
+      if (!isEnabled || !currentSessionId || isGuest) return;
 
       outbox.enqueue({
         op: 'fn_set_timer',
         args: {
-          p_session_id: sessionId,
+          p_session_id: currentSessionId,
           p_status: status,
           p_remaining_ms: remainingMs,
           p_ends_at: endsAt ? new Date(endsAt).toISOString() : null,
@@ -567,12 +596,13 @@ export function useMatchSync({ engineRef, timerRef, isGuest = false }) {
   // Update session metadata
   const updateSessionMeta = useCallback(
     ({ teamNames, teamPalettes }) => {
-      if (!isEnabled || !sessionId || isGuest) return;
+      const currentSessionId = sessionIdRef.current || sessionId;
+      if (!isEnabled || !currentSessionId || isGuest) return;
 
       outbox.enqueue({
         op: 'fn_update_session_meta',
         args: {
-          p_session_id: sessionId,
+          p_session_id: currentSessionId,
           p_team_names: teamNames,
           p_team_palettes: teamPalettes,
         },
@@ -584,23 +614,27 @@ export function useMatchSync({ engineRef, timerRef, isGuest = false }) {
   // Close session
   const closeSession = useCallback(
     async (status = 'completed') => {
-      if (!isEnabled || !sessionId) return;
+      const closingId = sessionIdRef.current || sessionId;
+      if (!isEnabled || !closingId) return;
+
+      // Immediately detach sessionIdRef and purge any queued ops for the closing session
+      sessionIdRef.current = null;
+      setSessionId(null);
+      localVersionRef.current = 0;
+      setLocalVersion(0);
+      setServerSession(null);
+      if (typeof window !== 'undefined') {
+        window.localStorage.removeItem(ACTIVE_SESSION_KEY);
+      }
+      outbox.filterQueue((q) => q.args?.p_session_id !== closingId);
 
       try {
         await supabase.rpc('fn_close_session', {
-          p_session_id: sessionId,
+          p_session_id: closingId,
           p_status: status,
         });
       } catch (err) {
         console.error('[useMatchSync] closeSession failed:', err);
-      } finally {
-        if (typeof window !== 'undefined') {
-          window.localStorage.removeItem(ACTIVE_SESSION_KEY);
-        }
-        setSessionId(null);
-        setLocalVersion(0);
-        localVersionRef.current = 0;
-        setServerSession(null);
       }
     },
     [isEnabled, sessionId]

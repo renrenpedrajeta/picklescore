@@ -81,6 +81,7 @@ export function Scoreboard() {
   }, [router]);
 
   const handleTimerExpireRef = useRef(null);
+  const isTransitioningMatchRef = useRef(false);
 
   const timer = useMatchTimer({
     onExpire: () => handleTimerExpireRef.current?.(),
@@ -127,7 +128,7 @@ export function Scoreboard() {
 
   // Handler for when match countdown timer reaches 00:00
   handleTimerExpireRef.current = () => {
-    if (state?.gameOver) return;
+    if (state?.gameOver || isTransitioningMatchRef.current) return;
     setIsTimeExpired(true);
     const res = timeExpired?.();
     if (res?.isDraw) {
@@ -139,6 +140,18 @@ export function Scoreboard() {
     }
     setGameWonModalOpen(true);
   };
+
+  // Automatically trigger match end when timer reaches 0 or hydrates as expired
+  useEffect(() => {
+    if (
+      (timer.status === 'expired' || timer.remainingSeconds === 0) &&
+      timer.status !== 'idle' &&
+      !state?.gameOver &&
+      !isTransitioningMatchRef.current
+    ) {
+      handleTimerExpireRef.current?.();
+    }
+  }, [timer.status, timer.remainingSeconds, state?.gameOver]);
 
   // Automatically pause timer and trigger GameWonModal when a team wins
   useEffect(() => {
@@ -158,33 +171,48 @@ export function Scoreboard() {
       !sync.sessionId &&
       engineRef.current &&
       !isGuest &&
-      profile
+      profile &&
+      !isTransitioningMatchRef.current
     ) {
-      timer.start();
-      sync.createSession(engineRef.current, timer.durationMs, true);
+      isTransitioningMatchRef.current = true;
+      sync
+        .createSession(engineRef.current, timer.durationMs, true)
+        .then(() => {
+          timer.start(true);
+        })
+        .finally(() => {
+          isTransitioningMatchRef.current = false;
+        });
     }
   }, [sync?.isEnabled, sync?.isLoadingSession, sync?.sessionId, isGuest, profile, timer.durationMs]);
 
-  // Score & control guards for Guest Mode
+  // Score & control guards
+  const isMatchOver = Boolean(
+    state?.gameOver || timer.status === 'expired' || timer.remainingSeconds === 0
+  );
+
   const handleNewMatch = useCallback(async () => {
-    if (isGuest) return;
+    if (isGuest || isTransitioningMatchRef.current) return;
+    isTransitioningMatchRef.current = true;
 
     setIsTimeExpired(false);
-    if (sync?.isEnabled && sync.sessionId) {
-      const isCompleted = state?.gameOver;
-      await sync.closeSession(isCompleted ? 'completed' : 'abandoned');
+    setGameWonModalOpen(false);
+
+    try {
+      if (sync?.isEnabled && sync.sessionId) {
+        const isCompleted = state?.gameOver || timer.status === 'expired';
+        await sync.closeSession(isCompleted ? 'completed' : 'abandoned');
+      }
+
       reset();
-      timer.reset();
-      timer.start();
-      setGameWonModalOpen(false);
-      if (engineRef.current) {
+      timer.reset(false);
+
+      if (sync?.isEnabled && engineRef.current) {
         await sync.createSession(engineRef.current, timer.durationMs, true);
       }
-    } else {
-      reset();
-      timer.reset();
-      timer.start();
-      setGameWonModalOpen(false);
+      timer.start(true);
+    } finally {
+      isTransitioningMatchRef.current = false;
     }
   }, [isGuest, reset, timer, sync, state?.gameOver]);
 
@@ -195,14 +223,20 @@ export function Scoreboard() {
   }, [isGuest, undo]);
 
   const handlePoint = useCallback(() => {
-    if (isGuest) return;
+    if (isGuest || isMatchOver) return;
+    if (timer.status === 'idle') {
+      timer.start();
+    }
     point();
-  }, [isGuest, point]);
+  }, [isGuest, isMatchOver, timer, point]);
 
   const handleFault = useCallback(() => {
-    if (isGuest) return;
+    if (isGuest || isMatchOver) return;
+    if (timer.status === 'idle') {
+      timer.start();
+    }
     fault();
-  }, [isGuest, fault]);
+  }, [isGuest, isMatchOver, timer, fault]);
 
   const handleUndo = useCallback(() => {
     if (isGuest) return;
@@ -210,14 +244,18 @@ export function Scoreboard() {
   }, [isGuest, undo]);
 
   const handleRedo = useCallback(() => {
-    if (isGuest) return;
+    if (isGuest || isMatchOver) return;
     redo();
-  }, [isGuest, redo]);
+  }, [isGuest, isMatchOver, redo]);
 
   const handleToggleTimer = useCallback(() => {
     if (isGuest) return;
-    timer.toggle();
-  }, [isGuest, timer]);
+    if (timer.status === 'expired' || timer.remainingSeconds === 0) {
+      handleNewMatch();
+    } else {
+      timer.toggle();
+    }
+  }, [isGuest, timer, handleNewMatch]);
 
   const teamKeys = state?.teamKeys || ['omega', 'alpha'];
   const teamNames = state?.teamNames || ['Team Omega', 'Team Alpha'];
@@ -304,7 +342,11 @@ export function Scoreboard() {
               onClick={() => !isGuest && setGameWonModalOpen(true)}
               disabled={isGuest}
             >
-              <span>🏆 Match won by {state.winnerName}! Tap to view summary or start new match</span>
+              <span>
+                {state.isDraw
+                  ? `⏰ Match ended in a draw (${scores[0]}–${scores[1]})! Tap to view summary or start new match`
+                  : `🏆 Match won by ${state.winnerName}! Tap to view summary or start new match`}
+              </span>
             </button>
           )}
 
@@ -355,7 +397,7 @@ export function Scoreboard() {
           teamNames={teamNames}
           canUndo={canUndo && !isTimeExpired}
           isDraw={Boolean(state?.isDraw)}
-          isTimeExpired={isTimeExpired}
+          isTimeExpired={isTimeExpired || timer.status === 'expired'}
           onNewMatch={handleNewMatch}
           onUndo={handleUndoWinningPoint}
           onClose={handleCloseGameWon}
