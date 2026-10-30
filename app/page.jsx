@@ -29,7 +29,7 @@ export default function RootPage() {
         if (!isMounted) return;
 
         if (session?.user) {
-          router.replace(`/pikolscore${search}`);
+          router.replace(`/matches${search}`);
         } else {
           router.replace(`/auth/login${search}`);
         }

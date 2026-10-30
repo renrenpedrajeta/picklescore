@@ -5,7 +5,7 @@ import FlipDigit from './FlipDigit';
 
 const useIsoLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
 
-export function CallRow({ servingTeamKey, servingTeamName, serverNumber }) {
+export function CallRow({ servingTeamKey, servingTeamName, serverNumber, format = 'doubles' }) {
   const flapNameRef = useRef(null);
   const prevNameRef = useRef(undefined);
   const upperName = String(servingTeamName || 'TEAM OMEGA').toUpperCase();
@@ -54,10 +54,12 @@ export function CallRow({ servingTeamKey, servingTeamName, serverNumber }) {
           {upperName}
         </span>
       </div>
-      <div className="ps-srv" data-team={servingTeamKey}>
-        <span className="ps-srv-label">SERVER</span>
-        <FlipDigit value={serverNumber ?? 1} className="ps-fd-sm" />
-      </div>
+      {format !== 'singles' && (
+        <div className="ps-srv" data-team={servingTeamKey}>
+          <span className="ps-srv-label">SERVER</span>
+          <FlipDigit value={serverNumber ?? 1} className="ps-fd-sm" />
+        </div>
+      )}
     </div>
   );
 }

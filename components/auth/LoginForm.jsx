@@ -139,7 +139,7 @@ export function LoginForm({ initialMode = 'signin' }) {
       }
 
       removeSavedAccount(account.userId);
-      router.replace('/pikolscore');
+      router.replace('/matches');
     } catch (err) {
       console.error('Quick login failed:', err);
       handleExpiredFallback(account);
@@ -281,7 +281,7 @@ export function LoginForm({ initialMode = 'signin' }) {
             }
             removeSavedAccount(data.session.user.id);
           }
-          router.push('/pikolscore');
+          router.push('/matches');
           return;
         }
 
@@ -316,7 +316,7 @@ export function LoginForm({ initialMode = 'signin' }) {
         removeSavedAccount(data.session.user.id);
       }
 
-      router.push('/pikolscore');
+      router.push('/matches');
     } catch (err) {
       setPasswordError(
         formatAuthError(err, 'Check your internet connection and try again.')

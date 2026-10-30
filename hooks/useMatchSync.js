@@ -15,7 +15,7 @@ export function useMatchSync({ engineRef, timerRef, isGuest = false }) {
   const [sessionId, setSessionId] = useState(() => {
     if (typeof window !== 'undefined') {
       const urlSession = new URLSearchParams(window.location.search).get('session');
-      return urlSession || window.localStorage.getItem(ACTIVE_SESSION_KEY) || null;
+      return urlSession || (isGuest ? window.localStorage.getItem(ACTIVE_SESSION_KEY) : null) || null;
     }
     return null;
   });
@@ -307,52 +307,7 @@ export function useMatchSync({ engineRef, timerRef, isGuest = false }) {
           : null;
       let discoveredSession = null;
 
-      // 2. If authenticated umpire, prioritize their active in_progress match from cloud
-      if (!activeId && user && !isGuest) {
-        try {
-          const { data: latestActive } = await supabase
-            .from('match_sessions')
-            .select('*')
-            .eq('umpire_id', user.id)
-            .eq('status', 'in_progress')
-            .order('updated_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-
-          if (latestActive?.id) {
-            activeId = latestActive.id;
-            discoveredSession = latestActive;
-            if (typeof window !== 'undefined') {
-              const localId = window.localStorage.getItem(ACTIVE_SESSION_KEY);
-              if (localId !== activeId) {
-                console.log('[useMatchSync] Adopting cloud active session:', activeId);
-                window.localStorage.setItem(ACTIVE_SESSION_KEY, activeId);
-                // Purge any stale ops queued for an old session
-                outbox.filterQueue(
-                  (q) => !q.args?.p_session_id || q.args.p_session_id === activeId
-                );
-              }
-            }
-          }
-        } catch (err) {
-          console.warn('[useMatchSync] Could not query active match for user:', err);
-        }
-      }
-
-      // 3. Check for legacy migration if no activeId found
-      if (!activeId && user && typeof window !== 'undefined') {
-        const rawV3 = window.localStorage.getItem(V3_STORAGE_KEY);
-        if (rawV3) {
-          activeId = await performLegacyMigration(user);
-        }
-      }
-
-      // 4. Check localStorage fallback
-      if (!activeId && typeof window !== 'undefined') {
-        activeId = window.localStorage.getItem(ACTIVE_SESSION_KEY) || null;
-      }
-
-      // 5. Multi-device discovery ONLY for spectator/guest if still no activeId
+      // 2. Multi-device discovery ONLY for spectator/guest if no explicit session
       if (!activeId && isGuest) {
         try {
           const { data: publicActive } = await supabase
@@ -381,12 +336,22 @@ export function useMatchSync({ engineRef, timerRef, isGuest = false }) {
         setSessionId(activeId);
         sessionIdRef.current = activeId;
         const res = await refetchAndRehydrate(discoveredSession, activeId);
-        // If session could not be retrieved, clear stale local storage key
-        if (!res && typeof window !== 'undefined') {
-          window.localStorage.removeItem(ACTIVE_SESSION_KEY);
+        // If session could not be retrieved or is not accessible, clear activeId
+        if (!res) {
+          if (typeof window !== 'undefined') {
+            window.localStorage.removeItem(ACTIVE_SESSION_KEY);
+          }
+          setSessionId(null);
+          sessionIdRef.current = null;
+        } else if (user && !isGuest && res.session?.umpire_id && res.session.umpire_id !== user.id) {
+          // Umpire trying to open a session owned by another umpire
+          console.warn('[useMatchSync] Session belongs to a different umpire.');
           setSessionId(null);
           sessionIdRef.current = null;
         }
+      } else {
+        setSessionId(null);
+        sessionIdRef.current = null;
       }
 
       setIsLoadingSession(false);

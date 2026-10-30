@@ -163,35 +163,25 @@ export function Scoreboard() {
     }
   }, [state?.gameOver]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-initialize cloud session only after discovery completes and none is found
+  // If an authenticated umpire visits /pikolscore without a valid session, redirect to /matches
   useEffect(() => {
     if (
       sync?.isEnabled &&
-      !sync.isLoadingSession &&
-      !sync.sessionId &&
-      engineRef.current &&
       !isGuest &&
-      profile &&
+      !sync?.isLoadingSession &&
+      !sync?.sessionId &&
       !isTransitioningMatchRef.current
     ) {
-      isTransitioningMatchRef.current = true;
-      sync
-        .createSession(engineRef.current, timer.durationMs, true)
-        .then(() => {
-          timer.start(true);
-        })
-        .finally(() => {
-          isTransitioningMatchRef.current = false;
-        });
+      router.replace('/matches');
     }
-  }, [sync?.isEnabled, sync?.isLoadingSession, sync?.sessionId, isGuest, profile, timer.durationMs]);
+  }, [sync?.isEnabled, isGuest, sync?.isLoadingSession, sync?.sessionId, router]);
 
   // Score & control guards
   const isMatchOver = Boolean(
     state?.gameOver || timer.status === 'expired' || timer.remainingSeconds === 0
   );
 
-  const handleNewMatch = useCallback(async () => {
+  const handleRematch = useCallback(async () => {
     if (isGuest || isTransitioningMatchRef.current) return;
     isTransitioningMatchRef.current = true;
 
@@ -208,13 +198,23 @@ export function Scoreboard() {
       timer.reset(false);
 
       if (sync?.isEnabled && engineRef.current) {
-        await sync.createSession(engineRef.current, timer.durationMs, true);
+        const newSessionId = await sync.createSession(engineRef.current, timer.durationMs, true);
+        if (newSessionId) {
+          router.replace(`/pikolscore?session=${newSessionId}`);
+        }
       }
       timer.start(true);
     } finally {
       isTransitioningMatchRef.current = false;
     }
-  }, [isGuest, reset, timer, sync, state?.gameOver]);
+  }, [isGuest, reset, timer, sync, state?.gameOver, router]);
+
+  const handleGoToMatches = useCallback(async () => {
+    if (sync?.isEnabled && sync.sessionId && (state?.gameOver || timer.status === 'expired')) {
+      await sync.closeSession('completed');
+    }
+    router.push('/matches');
+  }, [sync, state?.gameOver, timer.status, router]);
 
   const handleUndoWinningPoint = useCallback(() => {
     if (isGuest) return;
@@ -251,11 +251,11 @@ export function Scoreboard() {
   const handleToggleTimer = useCallback(() => {
     if (isGuest) return;
     if (timer.status === 'expired' || timer.remainingSeconds === 0) {
-      handleNewMatch();
+      handleRematch();
     } else {
       timer.toggle();
     }
-  }, [isGuest, timer, handleNewMatch]);
+  }, [isGuest, timer, handleRematch]);
 
   const teamKeys = state?.teamKeys || ['omega', 'alpha'];
   const teamNames = state?.teamNames || ['Team Omega', 'Team Alpha'];
@@ -306,6 +306,7 @@ export function Scoreboard() {
 
       {/* 3. Header remains outside the disabled/inert wrapper */}
       <Header
+        onBack={!isGuest ? () => router.push('/matches') : undefined}
         onOpenLog={() => !isGuest && setLogOpen(true)}
         profile={profile}
         userEmail={userEmail}
@@ -373,6 +374,7 @@ export function Scoreboard() {
             servingTeamKey={servingTeamKey}
             servingTeamName={servingTeamName}
             serverNumber={serverNumber}
+            format={state?.format || 'doubles'}
           />
 
           <div className="ps-sr" aria-live="polite">
@@ -386,6 +388,9 @@ export function Scoreboard() {
           open={logOpen}
           entries={log}
           legacyEntries={sync?.legacyLog || []}
+          format={state?.format || 'doubles'}
+          teamNames={teamNames}
+          playerNames={state?.playerNames}
           onClose={handleCloseLog}
           inert={gameWonModalOpen || undefined}
         />
@@ -398,8 +403,10 @@ export function Scoreboard() {
           canUndo={canUndo && !isTimeExpired}
           isDraw={Boolean(state?.isDraw)}
           isTimeExpired={isTimeExpired || timer.status === 'expired'}
-          onNewMatch={handleNewMatch}
+          onRematch={handleRematch}
+          onNewMatch={handleRematch}
           onUndo={handleUndoWinningPoint}
+          onGoToMatches={handleGoToMatches}
           onClose={handleCloseGameWon}
         />
       </div>

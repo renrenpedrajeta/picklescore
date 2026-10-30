@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { Trophy, RotateCcw, Undo2, X } from 'lucide-react';
+import { Trophy, RotateCcw, Undo2, ArrowLeft, X } from 'lucide-react';
 import { CONTENT } from '../../config/content';
 
 export function GameWonModal({
@@ -9,8 +9,10 @@ export function GameWonModal({
   winnerName,
   scores = [0, 0],
   teamNames = ['Team Omega', 'Team Alpha'],
+  onRematch,
   onNewMatch,
   onUndo,
+  onGoToMatches,
   onClose,
   canUndo = true,
   isDraw = false,
@@ -161,19 +163,19 @@ export function GameWonModal({
 
         <p className="ps-victory-detail">{displayDetail}</p>
 
-        {/* Action buttons: "New Match" and "Undo" or "Review Scoreboard" */}
-        <div className="ps-victory-actions">
+        {/* Action buttons: Rematch, Undo Winning Point, and Match Hub / New Match */}
+        <div className="ps-victory-actions flex flex-col gap-2.5 w-full">
           <button
             ref={primaryBtnRef}
             type="button"
             className="ps-victory-btn-primary"
-            onClick={onNewMatch}
+            onClick={onRematch || onNewMatch}
           >
             <RotateCcw size={18} aria-hidden="true" />
-            <span>{CONTENT.gameWonModal.newMatchButton}</span>
+            <span>{CONTENT.gameWonModal.rematchButton || 'Rematch (Same Players)'}</span>
           </button>
 
-          {canUndo && onUndo ? (
+          {canUndo && onUndo && (
             <button
               type="button"
               className="ps-victory-btn-secondary"
@@ -182,15 +184,18 @@ export function GameWonModal({
               <Undo2 size={16} aria-hidden="true" />
               <span>{CONTENT.gameWonModal.undoButton}</span>
             </button>
-          ) : onClose ? (
+          )}
+
+          {onGoToMatches && (
             <button
               type="button"
               className="ps-victory-btn-secondary"
-              onClick={onClose}
+              onClick={onGoToMatches}
             >
-              <span>{CONTENT.gameWonModal.reviewButton || 'Review Scoreboard'}</span>
+              <ArrowLeft size={16} aria-hidden="true" />
+              <span>{CONTENT.gameWonModal.goToMatchesButton || 'Match Hub / New Match'}</span>
             </button>
-          ) : null}
+          )}
         </div>
       </div>
     </div>

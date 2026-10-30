@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { LogOut, User, Cloud, CloudOff, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { LogOut, User, Cloud, CloudOff, RefreshCw, CheckCircle2, ArrowLeft } from 'lucide-react';
 import { supabase } from '@/config/supabase';
 import {
   saveAccountForQuickSwitch,
@@ -11,6 +11,8 @@ import {
 
 export function Header({
   onOpenLog,
+  onBack,
+  showMatchLog = true,
   profile,
   userEmail,
   onLogout,
@@ -93,15 +95,29 @@ export function Header({
 
   return (
     <header className="ps-header" {...rest}>
-      <div className="ps-logo">
-        <svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true">
-          <rect width="40" height="40" rx="12" fill="#0F5C62" />
-          <circle cx="20" cy="20" r="10" fill="#FEECD6" />
-          <circle cx="16.5" cy="16.5" r="1.6" fill="#203F39" />
-          <circle cx="23.5" cy="19" r="1.6" fill="#203F39" />
-          <circle cx="19" cy="24" r="1.6" fill="#203F39" />
-        </svg>
-        <span>PIKOLSCORE</span>
+      <div className="flex items-center gap-3">
+        {onBack && !isGuestSpectator && (
+          <button
+            type="button"
+            onClick={onBack}
+            className="ps-pill ps-pill-back flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold text-deep-green hover:bg-pale-sage transition-colors"
+            aria-label="Back to matches"
+            title="Back to Match Hub"
+          >
+            <ArrowLeft size={16} aria-hidden="true" />
+            <span className="hidden sm:inline">Matches</span>
+          </button>
+        )}
+        <div className="ps-logo">
+          <svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true">
+            <rect width="40" height="40" rx="12" fill="#0F5C62" />
+            <circle cx="20" cy="20" r="10" fill="#FEECD6" />
+            <circle cx="16.5" cy="16.5" r="1.6" fill="#203F39" />
+            <circle cx="23.5" cy="19" r="1.6" fill="#203F39" />
+            <circle cx="19" cy="24" r="1.6" fill="#203F39" />
+          </svg>
+          <span>PIKOLSCORE</span>
+        </div>
       </div>
 
       <div className="ps-header-actions">
@@ -146,16 +162,18 @@ export function Header({
           </div>
         )}
 
-        <button
-          type="button"
-          className={`ps-pill ${isGuestSpectator ? 'opacity-50 cursor-not-allowed pointer-events-none' : ''}`}
-          onClick={isGuestSpectator ? undefined : onOpenLog}
-          disabled={isGuestSpectator}
-          title={isGuestSpectator ? 'Match log disabled in spectator mode' : undefined}
-          aria-disabled={isGuestSpectator}
-        >
-          Match log
-        </button>
+        {showMatchLog && (
+          <button
+            type="button"
+            className={`ps-pill ${isGuestSpectator ? 'opacity-50 cursor-not-allowed pointer-events-none' : ''}`}
+            onClick={isGuestSpectator ? undefined : onOpenLog}
+            disabled={isGuestSpectator}
+            title={isGuestSpectator ? 'Match log disabled in spectator mode' : undefined}
+            aria-disabled={isGuestSpectator}
+          >
+            Match log
+          </button>
+        )}
 
         {displayIdentity && (
           <div className="ps-profile-badge" title={displayIdentity}>
