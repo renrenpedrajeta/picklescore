@@ -1,6 +1,12 @@
 'use client';
 
+import { useState, useEffect, useCallback } from 'react';
 import { formatMmSs } from '../../hooks/useMatchTimer';
+import {
+  read as readVoiceAudit,
+  clear as clearVoiceAudit,
+  toCsv as voiceAuditToCsv,
+} from '../../lib/voiceParser';
 
 export function MatchLog({
   open,
@@ -12,6 +18,41 @@ export function MatchLog({
   onClose,
   ...rest
 }) {
+  const [voiceEntries, setVoiceEntries] = useState([]);
+
+  const refreshVoiceAudit = useCallback(() => {
+    setVoiceEntries(readVoiceAudit());
+  }, []);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    refreshVoiceAudit();
+    if (typeof window === 'undefined') return undefined;
+    window.addEventListener('pikolscore:voice-audit', refreshVoiceAudit);
+    return () => window.removeEventListener('pikolscore:voice-audit', refreshVoiceAudit);
+  }, [open, refreshVoiceAudit]);
+
+  const handleExportVoiceCsv = () => {
+    const current = readVoiceAudit();
+    if (current.length === 0 || typeof window === 'undefined') return;
+    const csv = voiceAuditToCsv(current);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const dateStamp = new Date().toISOString().slice(0, 10);
+    link.href = url;
+    link.download = `pikolscore-voice-audit-${dateStamp}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleClearVoiceAudit = () => {
+    clearVoiceAudit();
+    setVoiceEntries([]);
+  };
+
   if (!open) return null;
 
   const reversed = [...entries].reverse();
@@ -52,6 +93,30 @@ export function MatchLog({
             </div>
           )}
         </div>
+
+        {voiceEntries.length > 0 && (
+          <div className="mb-4 flex items-center justify-between gap-2 rounded-xl border border-[#E2E5DC] bg-[#FAF9F5] p-2.5 text-xs text-[#203F39]">
+            <span className="font-semibold text-[#084B46]">
+              Voice log ({voiceEntries.length})
+            </span>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={handleExportVoiceCsv}
+                className="rounded-full bg-[#0F5C62] px-3 py-1 text-[11px] font-bold text-[#FEECD6] hover:bg-[#085953] transition-colors cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0F5C62]"
+              >
+                Export Voice CSV
+              </button>
+              <button
+                type="button"
+                onClick={handleClearVoiceAudit}
+                className="rounded-full border border-[#E2E5DC] bg-[#FEFEFB] px-2.5 py-1 text-[11px] font-semibold text-[#748079] hover:bg-[#EAF0E5] hover:text-[#203F39] transition-colors cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0F5C62]"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Legacy imported entries notice & list */}
         {reversedLegacy.length > 0 && (

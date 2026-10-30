@@ -6,6 +6,7 @@ import { Eye, AlertTriangle, X } from 'lucide-react';
 import { useScoreboard } from '../../hooks/useScoreboard';
 import { useMatchTimer } from '../../hooks/useMatchTimer';
 import { useMatchSync } from '../../hooks/useMatchSync';
+import { useVoiceScoring } from '../../hooks/useVoiceScoring';
 import Header from '../layout/Header';
 import ConsoleFooter from '../layout/ConsoleFooter';
 import ControlBar from './ControlBar';
@@ -257,6 +258,26 @@ export function Scoreboard() {
     }
   }, [isGuest, timer, handleRematch]);
 
+  const effectiveTimeExpired = Boolean(
+    isTimeExpired ||
+      timer.status === 'expired' ||
+      (timer.status !== 'idle' && timer.remainingSeconds === 0)
+  );
+
+  const voice = useVoiceScoring({
+    game: {
+      isGuest,
+      isTimeExpired: effectiveTimeExpired,
+      timerStatus: timer.status,
+      gameOver: Boolean(state?.gameOver),
+      canUndo: Boolean(canUndo),
+      sessionId: sync?.sessionId ?? null,
+    },
+    onPoint: handlePoint,
+    onFault: handleFault,
+    onUndo: handleUndoWinningPoint,
+  });
+
   const teamKeys = state?.teamKeys || ['omega', 'alpha'];
   const teamNames = state?.teamNames || ['Team Omega', 'Team Alpha'];
   const scores = state?.scores || [0, 0];
@@ -334,6 +355,12 @@ export function Scoreboard() {
             formattedTime={timer.formattedTime}
             timerLabel={timer.label}
             onToggleTimer={handleToggleTimer}
+            voiceSupported={voice.supported}
+            voiceActive={voice.active}
+            voicePill={voice.pill}
+            onToggleVoice={voice.toggle}
+            isGuest={isGuest}
+            isTimeExpired={effectiveTimeExpired}
           />
 
           {state?.gameOver && !gameWonModalOpen && (

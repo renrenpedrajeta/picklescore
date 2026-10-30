@@ -7,7 +7,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node test-rules.js && node test-sync.js"
+    "test": "node test-rules.js && node test-sync.js && node test-voice.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.3",
