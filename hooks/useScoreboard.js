@@ -96,12 +96,13 @@ export function useScoreboard({
     }
   }, [sync?.rehydrateVersion, sync?.serverSession, engineRef]);
 
-  const point = useCallback(() => {
+  const point = useCallback((reason = null) => {
     if (isGuest) return;
     const engine = engineRef.current;
     if (!engine) return;
     audioRef.current?.init();
-    const res = engine.pointWon(elapsedSecondsRef.current);
+    const cleanReason = typeof reason === 'string' && reason.trim() ? reason.trim() : null;
+    const res = engine.pointWon(elapsedSecondsRef.current, cleanReason);
     if (res?.event === 'gameWon') {
       audioRef.current?.gameWon();
     } else {
@@ -125,12 +126,13 @@ export function useScoreboard({
     }
   }, [isGuest, syncState, sync, engineRef]);
 
-  const fault = useCallback(() => {
+  const fault = useCallback((reason = null) => {
     if (isGuest) return;
     const engine = engineRef.current;
     if (!engine) return;
     audioRef.current?.init();
-    const res = engine.fault(elapsedSecondsRef.current);
+    const cleanReason = typeof reason === 'string' && reason.trim() ? reason.trim() : null;
+    const res = engine.fault(elapsedSecondsRef.current, cleanReason);
     audioRef.current?.fault();
     vibrate([20, 40, 20]);
     syncState();

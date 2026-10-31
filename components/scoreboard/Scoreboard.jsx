@@ -14,6 +14,8 @@ import TeamPanel from './TeamPanel';
 import CallRow from './CallRow';
 import MatchLog from './MatchLog';
 import GameWonModal from './GameWonModal';
+import VoiceDebugOverlay from './VoiceDebugOverlay';
+import { VOICE_CONFIG } from '@/config/voice';
 import { supabase } from '@/config/supabase';
 import { PickleballEngine } from '@/lib/engine';
 import { getSynth } from '@/lib/audio';
@@ -223,21 +225,35 @@ export function Scoreboard() {
     setGameWonModalOpen(false);
   }, [isGuest, undo]);
 
-  const handlePoint = useCallback(() => {
-    if (isGuest || isMatchOver) return;
-    if (timer.status === 'idle') {
-      timer.start();
-    }
-    point();
-  }, [isGuest, isMatchOver, timer, point]);
+  const handlePoint = useCallback(
+    (reason = null) => {
+      if (isGuest || isMatchOver) return;
+      point(reason);
+      if (!engineRef.current?.gameOver) {
+        if (timer.status === 'idle') {
+          timer.start();
+        } else if (timer.status === 'paused') {
+          timer.resume();
+        }
+      }
+    },
+    [isGuest, isMatchOver, timer, point]
+  );
 
-  const handleFault = useCallback(() => {
-    if (isGuest || isMatchOver) return;
-    if (timer.status === 'idle') {
-      timer.start();
-    }
-    fault();
-  }, [isGuest, isMatchOver, timer, fault]);
+  const handleFault = useCallback(
+    (reason = null) => {
+      if (isGuest || isMatchOver) return;
+      fault(reason);
+      if (!engineRef.current?.gameOver) {
+        if (timer.status === 'idle') {
+          timer.start();
+        } else if (timer.status === 'paused') {
+          timer.resume();
+        }
+      }
+    },
+    [isGuest, isMatchOver, timer, fault]
+  );
 
   const handleUndo = useCallback(() => {
     if (isGuest) return;
@@ -272,10 +288,18 @@ export function Scoreboard() {
       gameOver: Boolean(state?.gameOver),
       canUndo: Boolean(canUndo),
       sessionId: sync?.sessionId ?? null,
+      format: state?.format || 'doubles',
+      serverNumber: state?.serverNumber ?? (state?.format === 'doubles' ? 2 : 1),
+      callout: state?.callCompact || '',
+      liveAnnouncement: state?.liveAnnouncement || '',
     },
     onPoint: handlePoint,
     onFault: handleFault,
+    onSecondServe: handleFault,
+    onSideOut: handleFault,
     onUndo: handleUndoWinningPoint,
+    onPauseTimer: timer.pause,
+    onResumeTimer: timer.resume,
   });
 
   const teamKeys = state?.teamKeys || ['omega', 'alpha'];
@@ -420,7 +444,16 @@ export function Scoreboard() {
           playerNames={state?.playerNames}
           onClose={handleCloseLog}
           inert={gameWonModalOpen || undefined}
+          voiceMicMode={voice.micMode}
+          voiceMicModeSetting={voice.micModeSetting}
+          onSetMicModeSetting={voice.setMicModeSetting}
+          voiceTtsEnabled={voice.ttsEnabled}
+          onSetTtsEnabled={voice.setTtsEnabled}
         />
+
+        {VOICE_CONFIG.debugOverlay && voice.active && (
+          <VoiceDebugOverlay heard={voice.heard} />
+        )}
 
         <GameWonModal
           open={gameWonModalOpen}
